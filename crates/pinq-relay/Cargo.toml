@@ -1,0 +1,14 @@
+[package]
+name = "pinq-relay"
+version.workspace = true
+edition.workspace = true
+description = "Self-hostable store-and-forward relay for Pinq sync envelopes"
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+base64 = "0.22.1"
+blake3 = "1.8.5"
+chacha20poly1305 = "0.11.0"
+ed25519-dalek = "3.0.0"
+getrandom = "0.4.3"

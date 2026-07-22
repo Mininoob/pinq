@@ -1,0 +1,44 @@
+[package]
+name = "pinq-app"
+version.workspace = true
+edition.workspace = true
+description = "Pinq desktop shell"
+
+[lib]
+name = "pinq_app_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = ["tray-icon"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+pinq-core = { path = "../crates/pinq-core" }
+tauri-plugin-global-shortcut = "2"
+rusqlite = { version = "0.40.1", features = ["bundled"] }
+blake3 = "1.8.5"
+base64 = "0.22.1"
+zip = "8.6.0"
+ed25519-dalek = "3.0.0"
+keyring = { version = "4.1.5", features = ["windows-native-keyring-store"] }
+mdns-sd = "0.20.1"
+getrandom = "0.4.3"
+spake2 = "0.4.0"
+chacha20poly1305 = "0.11.0"
+pinq-relay = { path = "../crates/pinq-relay" }
+fastembed = "5.17.3"
+tauri-plugin-notification = "2.3.3"
+tauri-plugin-autostart = "2.5.1"
+
+[target.'cfg(windows)'.dependencies]
+windows = { version = "0.62", features = [
+  "Win32_Foundation",
+  "Win32_Graphics_Gdi",
+  "Win32_System_Com",
+  "Win32_System_Registry",
+  "Win32_UI_Input_KeyboardAndMouse",
+  "Win32_UI_Shell",
+  "Win32_UI_WindowsAndMessaging",
+] }

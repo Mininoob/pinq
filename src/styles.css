@@ -1,0 +1,2731 @@
+/* All Pinq windows are frameless + transparent; each role draws its own surface. */
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  background: transparent;
+  overflow: hidden;
+  font-family: "Segoe UI", system-ui, sans-serif;
+}
+
+/* ---------- Themes ----------
+   One palette drives the pad, the pull preview, and every note so they match.
+   Scoped to [data-theme] (not body) so swatches can preview any palette. */
+
+:root {
+  --pad-a: #f2b32c;
+  --pad-b: #e89a1c;
+  --pad-grip: rgba(90, 60, 0, 0.55);
+  --pad-shadow: rgba(60, 40, 0, 0.25);
+  --note-bg: #fdf0a4;
+  --note-border: rgba(120, 95, 10, 0.35);
+  --note-header: rgba(120, 95, 10, 0.08);
+  --note-ink: rgba(120, 95, 10, 0.4);
+  --note-text: #3a2e08;
+  --note-placeholder: rgba(90, 70, 5, 0.4);
+  --note-link: #2563eb;
+}
+
+/* Brand palette from the Pinq icon pack (#FFD45C / #FF6F6C / #242322 / #FFF8EE). */
+[data-theme="pinq"] {
+  --pad-a: #ffd45c;
+  --pad-b: #ff6f6c;
+  --pad-grip: rgba(36, 35, 34, 0.55);
+  --pad-shadow: rgba(36, 35, 34, 0.25);
+  --note-bg: #fff8ee;
+  --note-border: rgba(255, 111, 108, 0.45);
+  --note-header: rgba(255, 111, 108, 0.12);
+  --note-ink: rgba(36, 35, 34, 0.4);
+  --note-text: #242322;
+  --note-placeholder: rgba(36, 35, 34, 0.4);
+  /* Darkened coral: raw #FF6F6C doesn't have enough contrast on cream. */
+  --note-link: #d94845;
+}
+
+[data-theme="amber"] {
+  --pad-a: #f2b32c;
+  --pad-b: #e89a1c;
+  --pad-grip: rgba(90, 60, 0, 0.55);
+  --pad-shadow: rgba(60, 40, 0, 0.25);
+  --note-bg: #fdf0a4;
+  --note-border: rgba(120, 95, 10, 0.35);
+  --note-header: rgba(120, 95, 10, 0.08);
+  --note-ink: rgba(120, 95, 10, 0.4);
+  --note-text: #3a2e08;
+  --note-placeholder: rgba(90, 70, 5, 0.4);
+  --note-link: #2563eb;
+}
+
+[data-theme="mint"] {
+  --pad-a: #38cf92;
+  --pad-b: #1fa876;
+  --pad-grip: rgba(6, 66, 45, 0.55);
+  --pad-shadow: rgba(6, 66, 45, 0.25);
+  --note-bg: #d9f7e8;
+  --note-border: rgba(15, 105, 72, 0.35);
+  --note-header: rgba(15, 105, 72, 0.08);
+  --note-ink: rgba(15, 105, 72, 0.4);
+  --note-text: #0d3b2a;
+  --note-placeholder: rgba(15, 105, 72, 0.4);
+  --note-link: #2563eb;
+}
+
+[data-theme="sky"] {
+  --pad-a: #4aa8f0;
+  --pad-b: #2b8ce0;
+  --pad-grip: rgba(10, 55, 95, 0.55);
+  --pad-shadow: rgba(10, 55, 95, 0.25);
+  --note-bg: #d9edfd;
+  --note-border: rgba(25, 95, 160, 0.35);
+  --note-header: rgba(25, 95, 160, 0.08);
+  --note-ink: rgba(25, 95, 160, 0.4);
+  --note-text: #10344f;
+  --note-placeholder: rgba(25, 95, 160, 0.4);
+  --note-link: #2563eb;
+}
+
+[data-theme="rose"] {
+  --pad-a: #f06292;
+  --pad-b: #e04878;
+  --pad-grip: rgba(110, 20, 50, 0.55);
+  --pad-shadow: rgba(110, 20, 50, 0.25);
+  --note-bg: #fddce7;
+  --note-border: rgba(170, 40, 85, 0.35);
+  --note-header: rgba(170, 40, 85, 0.08);
+  --note-ink: rgba(170, 40, 85, 0.4);
+  --note-text: #4d1027;
+  --note-placeholder: rgba(170, 40, 85, 0.4);
+  --note-link: #2563eb;
+}
+
+[data-theme="violet"] {
+  --pad-a: #9575f5;
+  --pad-b: #7c5ce8;
+  --pad-grip: rgba(55, 35, 120, 0.55);
+  --pad-shadow: rgba(55, 35, 120, 0.25);
+  --note-bg: #e6defc;
+  --note-border: rgba(95, 70, 180, 0.35);
+  --note-header: rgba(95, 70, 180, 0.08);
+  --note-ink: rgba(95, 70, 180, 0.4);
+  --note-text: #2a1d55;
+  --note-placeholder: rgba(95, 70, 180, 0.4);
+  --note-link: #2563eb;
+}
+
+[data-theme="graphite"] {
+  --pad-a: #6b7280;
+  --pad-b: #4b5563;
+  --pad-grip: rgba(20, 25, 35, 0.55);
+  --pad-shadow: rgba(20, 25, 35, 0.3);
+  --note-bg: #e5e7eb;
+  --note-border: rgba(55, 65, 81, 0.4);
+  --note-header: rgba(55, 65, 81, 0.08);
+  --note-ink: rgba(55, 65, 81, 0.45);
+  --note-text: #1f2937;
+  --note-placeholder: rgba(55, 65, 81, 0.45);
+  --note-link: #2563eb;
+}
+
+/* ---------- Light/dark mode (library + panels) ----------
+   The sticky palette stays as-is in both modes; these vars restyle the chrome.
+   --paper-line is tinted from the palette so paper textures match the theme. */
+
+:root,
+body[data-mode="light"] {
+  --lib-bg: #faf8f2;
+  --lib-fg: #37322c;
+  --lib-muted: #8a8378;
+  --lib-border: rgba(0, 0, 0, 0.08);
+  --lib-hover: rgba(0, 0, 0, 0.04);
+  --lib-btn-bg: #ffffff;
+  --lib-btn-border: rgba(0, 0, 0, 0.15);
+  --danger-fg: #a03030;
+  --toast-bg: rgba(40, 36, 28, 0.94);
+  --toast-fg: #f4efe2;
+  --viewer-bg: #24211c;
+  --paper-line: color-mix(in srgb, var(--pad-b) 20%, transparent);
+  /* Ink for on-note paper textures; resolves against each note's own palette. */
+  --note-line: color-mix(in srgb, var(--note-text) 16%, transparent);
+
+  /* Quirky paper tiles (SVG so they stay crisp at any DPI). Neutral/candy inks
+     read well on every pastel note color. Tiles are 20px tall = one text row. */
+  --tex-dashed: url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' width='20' height='20'><line x1='0' y1='19' x2='20' y2='19' stroke='rgba(0,0,0,0.22)' stroke-width='1' stroke-dasharray='6 4'/></svg>");
+  --tex-wavy: url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' width='20' height='20'><path d='M0 18 Q5 15 10 18 T20 18' fill='none' stroke='rgba(0,0,0,0.20)' stroke-width='1'/></svg>");
+  --tex-zigzag: url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='20'><polyline points='0,19 3,15.5 6,19 9,15.5 12,19' fill='none' stroke='rgba(0,0,0,0.20)' stroke-width='1'/></svg>");
+  --tex-hearts: url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' width='26' height='20'><path d='M13 18.6c-2.3-1.9-4.4-3.4-4.4-5.2 0-1.2.9-2.1 2.1-2.1.9 0 1.7.5 2.3 1.3.6-.8 1.4-1.3 2.3-1.3 1.2 0 2.1.9 2.1 2.1 0 1.8-2.1 3.3-4.4 5.2z' fill='rgba(225,90,130,0.38)'/></svg>");
+  --tex-stars: url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' width='30' height='24'><path transform='translate(8,7)' d='M0 -3.2 L0.9 -0.9 L3.2 0 L0.9 0.9 L0 3.2 L-0.9 0.9 L-3.2 0 L-0.9 -0.9 Z' fill='rgba(230,160,40,0.42)'/><path transform='translate(22,17) scale(0.7)' d='M0 -3.2 L0.9 -0.9 L3.2 0 L0.9 0.9 L0 3.2 L-0.9 0.9 L-3.2 0 L-0.9 -0.9 Z' fill='rgba(160,110,220,0.35)'/></svg>");
+}
+
+body[data-mode="dark"] {
+  --lib-bg: #1d1b17;
+  --lib-fg: #e8e4da;
+  --lib-muted: #a09a8c;
+  --lib-border: rgba(255, 255, 255, 0.1);
+  --lib-hover: rgba(255, 255, 255, 0.06);
+  --lib-btn-bg: #2a2822;
+  --lib-btn-border: rgba(255, 255, 255, 0.16);
+  --danger-fg: #e08080;
+  --toast-bg: rgba(42, 40, 34, 0.96);
+  --toast-fg: #e8e4da;
+  --viewer-bg: #141210;
+  --paper-line: color-mix(in srgb, var(--pad-a) 28%, transparent);
+}
+
+/* ---------- Sticky pad ---------- */
+
+.pad-host {
+  height: 100%;
+  display: flex;
+  align-items: stretch;
+  cursor: grab;
+  outline: none;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+.pad-host.edge-right {
+  flex-direction: row;
+  justify-content: flex-end;
+}
+.pad-host.edge-left {
+  flex-direction: row;
+  justify-content: flex-start;
+}
+.pad-host.edge-top {
+  flex-direction: column;
+  justify-content: flex-start;
+}
+.pad-host.edge-bottom {
+  flex-direction: column;
+  justify-content: flex-end;
+}
+
+.pad {
+  background: linear-gradient(180deg, var(--pad-a), var(--pad-b));
+  transition: width 120ms ease-out, height 120ms ease-out, filter 150ms ease-out;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* Vertical pads (left/right edges): thickness = width. */
+.pad.edge-right {
+  width: 8px;
+  border-radius: 6px 0 0 6px;
+  box-shadow: -1px 0 4px var(--pad-shadow);
+}
+.pad.edge-left {
+  width: 8px;
+  border-radius: 0 6px 6px 0;
+  box-shadow: 1px 0 4px var(--pad-shadow);
+}
+.pad.edge-right.revealed,
+.pad.edge-right.armed,
+.pad.edge-right.pulling,
+.pad.edge-left.revealed,
+.pad.edge-left.armed,
+.pad.edge-left.pulling {
+  width: 18px;
+}
+/* Menu out: the pad itself fills the (temporarily grown) window. */
+.pad.edge-right.menu-open,
+.pad.edge-left.menu-open {
+  width: 100%;
+}
+
+/* Horizontal pads (top/bottom edges): thickness = height, gradient rotated. */
+.pad.edge-top,
+.pad.edge-bottom {
+  background: linear-gradient(90deg, var(--pad-a), var(--pad-b));
+}
+.pad.edge-top {
+  height: 8px;
+  border-radius: 0 0 6px 6px;
+  box-shadow: 0 1px 4px var(--pad-shadow);
+}
+.pad.edge-bottom {
+  height: 8px;
+  border-radius: 6px 6px 0 0;
+  box-shadow: 0 -1px 4px var(--pad-shadow);
+}
+.pad.edge-top.revealed,
+.pad.edge-top.armed,
+.pad.edge-top.pulling,
+.pad.edge-bottom.revealed,
+.pad.edge-bottom.armed,
+.pad.edge-bottom.pulling {
+  height: 18px;
+}
+.pad.edge-top.menu-open,
+.pad.edge-bottom.menu-open {
+  height: 100%;
+}
+
+.pad-host.edge-top .pad-grip,
+.pad-host.edge-bottom .pad-grip {
+  flex-direction: row;
+}
+
+.pad.armed {
+  filter: brightness(0.92);
+}
+
+.pad.pulling {
+  filter: brightness(0.85);
+}
+
+/* The pulled-out pad: a slim strip of text labels on the pad surface. */
+.pad-menu {
+  flex: 1;
+  align-self: stretch;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 3px;
+  animation: pad-menu-in 140ms ease-out;
+}
+.pad-menu.vertical {
+  flex-direction: column;
+}
+@keyframes pad-menu-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+.pad-menu-btn {
+  border: none;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.16);
+  cursor: pointer;
+  color: #fff;
+  font: 600 10.5px/1 "Segoe UI", system-ui, sans-serif;
+  padding: 5px 9px;
+}
+.pad-menu-btn:hover {
+  background: rgba(255, 255, 255, 0.32);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pad { transition: none; }
+  .pad-menu { animation: none; }
+}
+
+.pad-grip {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  opacity: 0;
+  transition: opacity 120ms ease-out;
+}
+
+.pad.revealed .pad-grip,
+.pad.settings-armed .pad-grip {
+  opacity: 1;
+}
+
+.pad-grip span {
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: var(--pad-grip);
+}
+
+/* ---------- Desktop note ---------- */
+
+.note {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  position: relative;
+  background: var(--note-bg);
+  border: 1px solid var(--note-border);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.note-header {
+  height: 26px;
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+  background: var(--note-header);
+  cursor: grab;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+.note-grip {
+  display: flex;
+  gap: 4px;
+  pointer-events: none;
+}
+
+.note-grip span {
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: var(--note-ink);
+}
+
+.note-trash {
+  position: absolute;
+  left: 4px;
+  top: 3px;
+  width: 20px;
+  height: 20px;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  font-size: 11px;
+  line-height: 1;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 100ms ease-out;
+}
+
+.note:hover .note-trash {
+  opacity: 0.55;
+}
+
+.note-trash:hover {
+  background: var(--note-header);
+  opacity: 1;
+}
+
+.note-color {
+  position: absolute;
+  left: 28px;
+  top: 6px;
+  width: 14px;
+  height: 14px;
+  border: 1px solid var(--note-border);
+  border-radius: 50%;
+  background: linear-gradient(135deg, var(--pad-a), var(--pad-b));
+  cursor: pointer;
+  opacity: 0.45;
+  transition: opacity 100ms ease-out;
+}
+
+.note:hover .note-color {
+  opacity: 0.8;
+}
+
+.note-color:hover {
+  opacity: 1;
+}
+
+/* Live tag chips on the note — typing "#tag " adds one, click removes.
+   The strip fades while you're writing and returns on hover, so it never
+   crowds a note mid-edit. */
+.note-tags {
+  flex: none;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding: 5px 8px;
+  background: var(--note-header);
+  transition: opacity 250ms ease-out;
+}
+
+.note:has(.item-text:focus) .note-tags {
+  opacity: 0.25;
+}
+
+.note-tags:hover {
+  opacity: 1 !important;
+}
+
+.note-tag {
+  border: 1px solid var(--note-border);
+  border-radius: 999px;
+  background: var(--note-bg);
+  color: var(--note-text);
+  font-size: 10px;
+  padding: 2px 8px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.note-tag:hover {
+  background: var(--note-header);
+}
+
+.note-tag-x {
+  opacity: 0.45;
+  font-size: 9px;
+}
+
+.note-tag:hover .note-tag-x {
+  opacity: 1;
+}
+
+/* Ghost chips: suggested tags/title — dashed and dimmed until hovered.
+   The chip is a span holding two buttons (accept + dismiss). */
+.note-tag-ghost {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  border-style: dashed;
+  opacity: 0.65;
+  cursor: default;
+}
+
+.note-tag-ghost:hover {
+  opacity: 1;
+  background: var(--note-bg);
+}
+
+.note-tag-add {
+  border: none;
+  background: none;
+  color: var(--note-link, #2563eb);
+  font-size: 10px;
+  padding: 0;
+  cursor: pointer;
+  white-space: nowrap;
+  max-width: 150px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.note-tag-ghost .note-tag-x {
+  border: none;
+  background: none;
+  color: var(--note-text);
+  padding: 0;
+  cursor: pointer;
+}
+
+.note-title-ghost .note-tag-add {
+  max-width: 190px;
+}
+
+.note-palette {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 6px 10px;
+  background: var(--note-header);
+}
+
+.note-palette-row {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.note-paper-chip {
+  width: 26px;
+  height: 18px;
+  border: 1px solid var(--note-border);
+  border-radius: 4px;
+  background-color: var(--note-bg);
+  cursor: pointer;
+  font-size: 10px;
+  line-height: 1;
+  color: var(--note-text);
+  padding: 0;
+}
+
+.note-paper-chip.auto {
+  font-weight: 700;
+}
+
+.note-paper-chip.active {
+  outline: 2px solid var(--note-text);
+  outline-offset: 1px;
+}
+
+/* Paper chips reuse the picker textures but draw with note ink. */
+.note-paper-chip.paper-tex-ruled,
+.note-paper-chip.paper-tex-dotted,
+.note-paper-chip.paper-tex-grid {
+  --paper-line: var(--note-line);
+}
+
+.note-palette-dot {
+  width: 18px;
+  height: 18px;
+  border: 1px solid var(--note-border);
+  border-radius: 50%;
+  background: linear-gradient(135deg, var(--pad-a) 40%, var(--note-bg) 60%);
+  cursor: pointer;
+  font-size: 10px;
+  line-height: 1;
+  color: var(--note-text);
+  padding: 0;
+}
+
+.note-palette-dot.auto {
+  background: transparent;
+  font-weight: 700;
+}
+
+.note-palette-dot.active {
+  outline: 2px solid var(--note-text);
+  outline-offset: 1px;
+}
+
+.note-history-btn {
+  position: absolute;
+  right: 26px;
+  top: 3px;
+  width: 20px;
+  height: 20px;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  font-size: 11px;
+  line-height: 1;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 100ms ease-out;
+}
+
+.note:hover .note-history-btn {
+  opacity: 0.55;
+}
+
+.note-remind-btn {
+  position: absolute;
+  right: 70px;
+  top: 3px;
+  width: 20px;
+  height: 20px;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  font-size: 11px;
+  line-height: 1;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 100ms ease-out;
+}
+
+.note:hover .note-remind-btn {
+  opacity: 0.55;
+}
+
+.note-remind-btn:hover {
+  background: var(--note-header);
+  opacity: 1;
+}
+
+/* A set reminder stays visible without hovering. */
+.note-remind-btn.armed {
+  opacity: 0.9;
+}
+
+/* Reminder popover: presets + a custom picker, styled like the palette. */
+.note-remind {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px 10px;
+  background: var(--note-header);
+}
+
+.note-remind-current {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11px;
+  color: var(--note-text);
+  padding-bottom: 2px;
+}
+
+.note-remind-clear {
+  border: 1px solid var(--note-border);
+  border-radius: 999px;
+  background: var(--note-bg);
+  color: var(--note-text);
+  font-size: 10px;
+  padding: 1px 8px;
+  cursor: pointer;
+}
+
+.note-remind-option {
+  border: 1px solid var(--note-border);
+  border-radius: 6px;
+  background: var(--note-bg);
+  color: var(--note-text);
+  font-size: 11px;
+  text-align: left;
+  padding: 4px 8px;
+  cursor: pointer;
+}
+
+.note-remind-option:hover {
+  background: var(--note-header);
+}
+
+.note-remind-input {
+  width: 100%;
+  border: 1px solid var(--note-border);
+  border-radius: 6px;
+  background: var(--note-bg);
+  color: var(--note-text);
+  font-size: 11px;
+  padding: 3px 6px;
+  outline: none;
+}
+
+.note-copy {
+  position: absolute;
+  right: 48px;
+  top: 3px;
+  width: 20px;
+  height: 20px;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--note-text);
+  font-size: 12px;
+  line-height: 1;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 100ms ease-out;
+}
+
+.note:hover .note-copy {
+  opacity: 0.55;
+}
+
+.note-copy:hover,
+.note-copy.copied {
+  background: var(--note-header);
+  opacity: 1;
+}
+
+.note-history-btn:hover {
+  background: var(--note-header);
+  opacity: 1;
+}
+
+.note-surface {
+  position: relative;
+  flex: 1;
+  display: flex;
+  min-height: 0;
+}
+
+.note-history {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--note-bg);
+  z-index: 2;
+}
+
+.note-history-header {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 10px;
+  background: var(--note-header);
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--note-text);
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+.note-history-close {
+  border: none;
+  background: transparent;
+  color: var(--note-text);
+  font-size: 11px;
+  cursor: pointer;
+  padding: 2px 4px;
+  border-radius: 3px;
+}
+
+.note-history-close:hover {
+  background: var(--note-header);
+}
+
+.note-history-list {
+  flex: 1;
+  overflow-y: auto;
+  scrollbar-width: none;
+}
+
+.note-history-list::-webkit-scrollbar {
+  display: none;
+}
+
+.note-history-empty {
+  padding: 16px 10px;
+  font-size: 11px;
+  color: var(--note-placeholder);
+  text-align: center;
+}
+
+.note-history-row {
+  display: block;
+  width: 100%;
+  text-align: left;
+  border: none;
+  background: transparent;
+  padding: 7px 10px;
+  cursor: pointer;
+  color: var(--note-text);
+  border-bottom: 1px solid var(--note-header);
+}
+
+.note-history-row:hover {
+  background: var(--note-header);
+}
+
+.note-history-time {
+  display: block;
+  font-size: 9px;
+  opacity: 0.6;
+}
+
+.note-history-preview {
+  display: block;
+  font-size: 11px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.note-file {
+  position: absolute;
+  right: 4px;
+  top: 3px;
+  width: 20px;
+  height: 20px;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--note-text);
+  font-size: 13px;
+  line-height: 1;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 100ms ease-out;
+}
+
+.note:hover .note-file {
+  opacity: 0.75;
+}
+
+.note-file:hover {
+  background: var(--note-header);
+  opacity: 1;
+}
+
+/* The freeform canvas: double-click to write, drag items around. */
+.note-canvas {
+  flex: 1;
+  position: relative;
+  overflow: auto;
+  background-attachment: local;
+  scrollbar-width: none;
+}
+
+.note-canvas::-webkit-scrollbar {
+  display: none;
+}
+
+.canvas-item {
+  position: absolute;
+}
+
+/* Slim grab strip that appears above an item on hover. */
+.item-handle {
+  position: absolute;
+  top: -9px;
+  left: 8px;
+  right: 8px;
+  height: 8px;
+  border-radius: 4px;
+  background: var(--note-ink);
+  opacity: 0;
+  cursor: grab;
+  transition: opacity 100ms ease-out;
+  touch-action: none;
+}
+
+.canvas-item:hover .item-handle {
+  opacity: 0.7;
+}
+
+.item-handle:active {
+  cursor: grabbing;
+}
+
+.item-text-wrap {
+  position: relative;
+}
+
+.item-text {
+  display: block;
+  width: 100%;
+  border: 1px dashed transparent;
+  border-radius: 4px;
+  outline: none;
+  resize: none;
+  overflow: hidden;
+  background: transparent;
+  padding: 2px 4px;
+  /* Fixed 20px line grid so ruled paper aligns with the text. */
+  font: 14px/20px "Segoe UI", system-ui, sans-serif;
+  /* Glyphs are drawn by the mirror overlay (so [[links]] can be styled);
+     the textarea keeps the caret, selection, and all input behavior. */
+  color: transparent;
+  caret-color: var(--note-text);
+  min-height: 24px;
+}
+
+/* Mirror overlay: must copy the textarea's box and text metrics EXACTLY
+   (border width, padding, font, wrapping) or glyphs drift off the caret. */
+.item-text-render {
+  position: absolute;
+  inset: 0;
+  border: 1px solid transparent;
+  padding: 2px 4px;
+  font: 14px/20px "Segoe UI", system-ui, sans-serif;
+  color: var(--note-text);
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.wiki-link {
+  color: var(--note-link, #2563eb);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  background: rgba(37, 99, 235, 0.09);
+  border-radius: 5px;
+}
+
+/* The [[ ]] glyphs stay in the layout (the mirror must match the textarea
+   character-for-character) but render invisible — their width reads as the
+   chip's padding. While a link is still being typed (no closing ]]) the raw
+   brackets show normally, since unclosed brackets never match LINK_RE. */
+.wiki-brackets {
+  opacity: 0;
+}
+
+/* Markdown accents in the mirror. EVERY rule here must be width-neutral
+   (text-shadow, color, background, line-through only) — real bold/italic
+   faces or font sizes change glyph advances and drift the mirror off the
+   caret. Markers stay dimly visible so editing them is never a surprise. */
+.md-marker {
+  opacity: 0.35;
+}
+
+.md-bold {
+  /* Faux bold: thickens glyphs without changing their widths. */
+  text-shadow: 0 0 0.65px currentColor;
+}
+
+.md-italic {
+  color: color-mix(in srgb, var(--note-text) 55%, var(--note-link, #2563eb));
+}
+
+.md-code {
+  background: color-mix(in srgb, var(--note-text) 10%, transparent);
+  border-radius: 4px;
+}
+
+.md-strike {
+  text-decoration: line-through;
+  opacity: 0.7;
+}
+
+.md-h {
+  text-shadow: 0 0 0.8px currentColor;
+  text-decoration: underline;
+  text-underline-offset: 4px;
+  text-decoration-color: color-mix(in srgb, var(--note-text) 30%, transparent);
+}
+
+/* Find-in-note highlights, drawn by the mirror. No padding/borders — a mark
+   must not change text metrics or the mirror drifts off the caret. */
+.item-text-render mark.find-hit {
+  font: inherit;
+  padding: 0;
+  color: inherit;
+  background: rgba(255, 213, 79, 0.5);
+  border-radius: 2px;
+}
+
+.item-text-render mark.find-hit.current {
+  background: rgba(255, 152, 56, 0.8);
+}
+
+/* Find pill: a little rounded chip floating in the note's top-right corner. */
+.note-find {
+  position: absolute;
+  top: 6px;
+  right: 8px;
+  z-index: 7;
+  display: flex;
+  align-items: center;
+  gap: 1px;
+  padding: 2px 3px 2px 7px;
+  border: 1px solid var(--note-border);
+  border-radius: 999px;
+  background: var(--note-header);
+  box-shadow: 0 3px 10px rgba(0, 0, 0, 0.16);
+}
+
+.note-find-glyph {
+  flex: none;
+  font-size: 9px;
+  opacity: 0.6;
+  transform: scaleX(-1); /* handle points at the text */
+}
+
+.note-find-input {
+  width: 72px;
+  border: 0;
+  background: transparent;
+  color: var(--note-text);
+  font: 11px/14px "Segoe UI", system-ui, sans-serif;
+  padding: 2px 3px;
+  outline: none;
+}
+
+.note-find-input::placeholder {
+  color: var(--note-placeholder);
+}
+
+.note-find-input::-webkit-search-cancel-button {
+  display: none;
+}
+
+.note-find-count {
+  flex: none;
+  font-size: 9px;
+  opacity: 0.6;
+  color: var(--note-text);
+  padding: 0 2px;
+  text-align: center;
+}
+
+.note-find-btn {
+  flex: none;
+  border: 0;
+  background: none;
+  color: var(--note-text);
+  font-size: 11px;
+  line-height: 1;
+  padding: 3px 4px;
+  border-radius: 999px;
+  cursor: pointer;
+  opacity: 0.65;
+}
+
+.note-find-btn:hover {
+  opacity: 1;
+  background: var(--note-bg);
+}
+
+/* Hold Ctrl and links become clickable, like a browser. */
+.note.ctrl-down .wiki-link {
+  pointer-events: auto;
+  cursor: pointer;
+}
+
+.note.ctrl-down .wiki-link:hover {
+  filter: brightness(1.15);
+  text-decoration-thickness: 2px;
+}
+
+.canvas-item:hover .item-text,
+.item-text:focus {
+  border-color: var(--note-border);
+}
+
+.item-text::placeholder {
+  color: var(--note-placeholder);
+}
+
+.canvas-hint {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  color: var(--note-placeholder);
+  font-size: 13px;
+  pointer-events: none;
+  padding: 12px;
+}
+
+.canvas-hint span {
+  font-size: 10px;
+  opacity: 0.8;
+}
+
+/* Note paper textures. body[data-note-paper] is the effective paper for this
+   note window (global default, or the note's own override set by theme.ts). */
+body[data-note-paper="ruled"] .note-canvas {
+  background-image: repeating-linear-gradient(
+    to bottom,
+    transparent 0 19px,
+    var(--note-line) 19px 20px
+  );
+  background-position: 0 6px;
+}
+
+body[data-note-paper="dotted"] .note-canvas {
+  background-image: radial-gradient(var(--note-line) 1px, transparent 1px);
+  background-size: 16px 16px;
+  background-position: 8px 10px;
+}
+
+body[data-note-paper="grid"] .note-canvas {
+  background-image: linear-gradient(to right, var(--note-line) 1px, transparent 1px),
+    linear-gradient(to bottom, var(--note-line) 1px, transparent 1px);
+  background-size: 20px 20px;
+  background-position: 0 6px;
+}
+
+/* Quirky papers: tiles are one 20px text row tall, so writing sits on them. */
+body[data-note-paper="dashed"] .note-canvas {
+  background-image: var(--tex-dashed);
+  background-size: 20px 20px;
+  background-position: 0 6px;
+}
+
+body[data-note-paper="wavy"] .note-canvas {
+  background-image: var(--tex-wavy);
+  background-size: 20px 20px;
+  background-position: 0 6px;
+}
+
+body[data-note-paper="zigzag"] .note-canvas {
+  background-image: var(--tex-zigzag);
+  background-size: 12px 20px;
+  background-position: 0 6px;
+}
+
+body[data-note-paper="hearts"] .note-canvas {
+  background-image: var(--tex-hearts);
+  background-size: 26px 20px;
+  background-position: 4px 6px;
+}
+
+body[data-note-paper="stars"] .note-canvas {
+  background-image: var(--tex-stars);
+  background-size: 30px 24px;
+}
+
+/* ---------- Canvas attachments ---------- */
+
+.att-img {
+  width: 100%;
+  height: auto;
+  border-radius: 5px;
+  border: 1px solid var(--note-border);
+  cursor: grab;
+  display: block;
+  box-shadow: 0 1px 4px rgba(40, 30, 0, 0.15);
+  -webkit-user-drag: none;
+  user-select: none;
+  touch-action: none;
+}
+
+.att-img:active {
+  cursor: grabbing;
+}
+
+/* Players are controlled by clicks, so they move via a visible handle. */
+.canvas-item.is-player .item-handle {
+  opacity: 0.35;
+}
+
+.att-video,
+.att-audio {
+  width: 100%;
+  display: block;
+  border-radius: 5px;
+}
+
+.att-chip {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid var(--note-border);
+  border-radius: 5px;
+  background: var(--note-bg);
+  color: var(--note-text);
+  font-size: 11px;
+  cursor: pointer;
+  box-shadow: 0 1px 4px rgba(40, 30, 0, 0.12);
+}
+
+.att-chip-name {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.att-x {
+  position: absolute;
+  top: -6px;
+  right: -6px;
+  z-index: 1;
+  width: 16px;
+  height: 16px;
+  border: 1px solid var(--note-border);
+  border-radius: 50%;
+  background: var(--note-bg);
+  color: var(--note-text);
+  font-size: 9px;
+  line-height: 1;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 100ms ease-out;
+  padding: 0;
+}
+
+.canvas-item:hover .att-x {
+  opacity: 1;
+}
+
+/* [[Note link]] autocomplete popup, anchored under the text box being typed in. */
+.link-menu {
+  position: absolute;
+  z-index: 6;
+  min-width: 140px;
+  max-width: 230px;
+  display: flex;
+  flex-direction: column;
+  padding: 3px;
+  border: 1px solid var(--note-border);
+  border-radius: 8px;
+  background: var(--note-bg);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.22);
+}
+
+.link-menu-row {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  border: 0;
+  background: none;
+  color: var(--note-text);
+  font-size: 12px;
+  text-align: left;
+  padding: 5px 8px;
+  border-radius: 5px;
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.link-menu-row.selected {
+  background: var(--note-header);
+}
+
+.link-menu-new {
+  font-size: 10px;
+  opacity: 0.55;
+}
+
+/* Undo chip after deleting a canvas item (Ctrl+Z works too). */
+.note-undo-chip {
+  position: absolute;
+  bottom: 10px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 8;
+  border: none;
+  border-radius: 999px;
+  padding: 5px 14px;
+  background: var(--toast-bg);
+  color: var(--toast-fg);
+  font-size: 12px;
+  cursor: pointer;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25);
+  white-space: nowrap;
+}
+
+.note-undo-chip b {
+  color: var(--pad-a);
+}
+
+.note-undo-chip:hover b {
+  text-decoration: underline;
+}
+
+/* Backlinks strip: chips for the notes whose text links to this one. */
+.note-backlinks {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 8px;
+  background: var(--note-header);
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.note-backlinks::-webkit-scrollbar {
+  display: none;
+}
+
+.backlinks-label {
+  flex: none;
+  font-size: 10px;
+  opacity: 0.55;
+  color: var(--note-text);
+}
+
+.backlink-chip {
+  flex: none;
+  border: 1px solid var(--note-border);
+  border-radius: 999px;
+  background: var(--note-bg);
+  color: var(--note-text);
+  font-size: 10px;
+  padding: 2px 8px;
+  cursor: pointer;
+  white-space: nowrap;
+  max-width: 150px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.backlink-chip:hover {
+  background: var(--note-header);
+}
+
+/* Corner resize grip for attachments. */
+.item-resize {
+  position: absolute;
+  bottom: -5px;
+  right: -5px;
+  z-index: 1;
+  width: 13px;
+  height: 13px;
+  border: 1px solid var(--note-bg);
+  border-radius: 4px;
+  background: var(--note-ink);
+  cursor: nwse-resize;
+  opacity: 0;
+  transition: opacity 100ms ease-out;
+  touch-action: none;
+}
+
+.canvas-item:hover .item-resize {
+  opacity: 0.75;
+}
+
+.item-resize:hover {
+  opacity: 1;
+}
+
+.sticky-card-img {
+  width: 100%;
+  max-height: 70px;
+  object-fit: cover;
+  border-radius: 4px;
+  border: 1px solid var(--note-border);
+  margin-bottom: 6px;
+}
+
+/* ---------- Undo toast ---------- */
+
+.toast {
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  background: var(--toast-bg);
+  border-radius: 10px;
+  color: var(--toast-fg);
+  font-size: 13px;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+.toast-undo {
+  border: none;
+  background: rgba(255, 255, 255, 0.14);
+  color: var(--pad-a);
+  font-size: 13px;
+  font-weight: 600;
+  padding: 5px 14px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.toast-undo:hover {
+  background: rgba(255, 255, 255, 0.26);
+}
+
+/* ---------- Pull preview ---------- */
+
+.preview-note {
+  height: 96%;
+  width: 96%;
+  margin: 2%;
+  background: var(--note-bg);
+  opacity: 0.85;
+  border: 1px solid var(--note-border);
+  border-radius: 8px;
+  transform: rotate(2deg);
+  display: flex;
+  flex-direction: column;
+}
+
+.preview-header {
+  height: 26px;
+  background: var(--note-header);
+  border-radius: 8px 8px 0 0;
+}
+
+/* ---------- Quick find ---------- */
+
+.find-panel {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  background: var(--lib-bg);
+  border: 1px solid var(--lib-btn-border);
+  border-radius: 12px;
+  overflow: hidden;
+  color: var(--lib-fg);
+}
+
+.find-input {
+  flex: none;
+  margin: 12px;
+  border: 1px solid var(--lib-btn-border);
+  border-radius: 8px;
+  background: var(--lib-btn-bg);
+  color: var(--lib-fg);
+  font-size: 15px;
+  padding: 10px 14px;
+  outline: none;
+}
+
+.find-input:focus {
+  border-color: var(--pad-b);
+}
+
+.find-input::placeholder {
+  color: var(--lib-muted);
+}
+
+.find-results {
+  flex: 1;
+  overflow-y: auto;
+  padding: 0 8px;
+  scrollbar-width: none;
+}
+
+.find-results::-webkit-scrollbar {
+  display: none;
+}
+
+.find-empty {
+  padding: 24px 0;
+  text-align: center;
+  color: var(--lib-muted);
+  font-size: 13px;
+}
+
+.find-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 10px;
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.find-row.selected {
+  background: var(--lib-hover);
+  outline: 1px solid var(--pad-b);
+}
+
+.find-swatch {
+  flex: none;
+  width: 12px;
+  height: 12px;
+  border-radius: 3px;
+  background: var(--note-bg);
+  border: 1px solid var(--note-border);
+}
+
+.find-title {
+  flex: 1;
+  font-size: 13px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.find-title.empty {
+  color: var(--lib-muted);
+  font-style: italic;
+}
+
+.find-meta {
+  flex: none;
+  font-size: 11px;
+  color: var(--lib-muted);
+}
+
+.find-hints {
+  flex: none;
+  display: flex;
+  gap: 16px;
+  justify-content: center;
+  padding: 8px 12px;
+  border-top: 1px solid var(--lib-border);
+  font-size: 11px;
+  color: var(--lib-muted);
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+/* ---------- Image viewer (always dark) ---------- */
+
+.viewer {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  background: var(--viewer-bg, #191713);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 12px;
+  overflow: hidden;
+  color: #e8e4da;
+  outline: none;
+}
+
+.viewer-bar {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 10px;
+  background: rgba(255, 255, 255, 0.05);
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+.viewer-name {
+  flex: 1;
+  font-size: 12px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  opacity: 0.85;
+}
+
+.viewer-zoom {
+  font-size: 11px;
+  opacity: 0.6;
+  min-width: 44px;
+  text-align: right;
+}
+
+.viewer-bar button {
+  flex: none;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.06);
+  color: #e8e4da;
+  font-size: 11px;
+  padding: 4px 9px;
+  cursor: pointer;
+}
+
+.viewer-bar button:hover {
+  background: rgba(255, 255, 255, 0.14);
+}
+
+.viewer-bar button.active {
+  background: var(--pad-b);
+  border-color: var(--pad-b);
+  color: #fff;
+}
+
+.viewer-stage {
+  flex: 1;
+  position: relative;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: grab;
+  touch-action: none;
+}
+
+.viewer-stage:active {
+  cursor: grabbing;
+}
+
+.viewer-img {
+  max-width: none;
+  max-height: none;
+  transform-origin: center center;
+  -webkit-user-drag: none;
+  user-select: none;
+  will-change: transform;
+}
+
+.viewer-strip {
+  flex: none;
+  display: flex;
+  gap: 6px;
+  padding: 8px 10px;
+  background: rgba(255, 255, 255, 0.04);
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.viewer-strip::-webkit-scrollbar {
+  display: none;
+}
+
+.viewer-thumb {
+  height: 44px;
+  border-radius: 4px;
+  border: 2px solid transparent;
+  cursor: pointer;
+  opacity: 0.6;
+}
+
+.viewer-thumb:hover {
+  opacity: 1;
+}
+
+.viewer-thumb.active {
+  border-color: var(--pad-a);
+  opacity: 1;
+}
+
+/* ---------- Settings panel ---------- */
+
+.settings-panel {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  background: var(--lib-bg);
+  border: 1px solid var(--lib-btn-border);
+  border-radius: 12px;
+  overflow: hidden;
+  color: var(--lib-fg);
+}
+
+.settings-header {
+  height: 40px;
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 8px 0 16px;
+  background: var(--lib-hover);
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--lib-fg);
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+.settings-close {
+  width: 26px;
+  height: 26px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--lib-fg);
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.settings-close:hover {
+  background: var(--lib-hover);
+}
+
+.settings-body {
+  padding: 18px 20px 24px;
+  overflow-y: auto;
+  /* Scroll works (wheel/keys/touch) but no visible bar. */
+  scrollbar-width: none;
+}
+
+.settings-body::-webkit-scrollbar {
+  display: none;
+}
+
+.settings-body h2 {
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: var(--lib-muted);
+  margin-top: 22px;
+  padding-top: 18px;
+  border-top: 1px solid var(--lib-border);
+}
+
+.settings-body h2:first-child {
+  margin-top: 0;
+  padding-top: 0;
+  border-top: none;
+}
+
+.settings-hint {
+  font-size: 12px;
+  color: var(--lib-muted);
+  margin: 4px 0 12px;
+}
+
+/* Segmented control (library light/dark mode) */
+
+.seg {
+  display: flex;
+  margin-top: 8px;
+  border: 1px solid var(--lib-btn-border);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.seg-btn {
+  flex: 1;
+  border: none;
+  background: var(--lib-btn-bg);
+  color: var(--lib-fg);
+  font-size: 12px;
+  padding: 8px 6px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.seg-btn + .seg-btn {
+  border-left: 1px solid var(--lib-btn-border);
+}
+
+.seg-btn.active {
+  background: var(--pad-b);
+  color: #fff;
+  font-weight: 600;
+}
+
+.settings-position {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.settings-slider {
+  flex: 1;
+  accent-color: var(--pad-b);
+  cursor: pointer;
+}
+
+.settings-num {
+  width: 58px;
+  border: 1px solid var(--lib-btn-border);
+  border-radius: 7px;
+  background: var(--lib-btn-bg);
+  color: var(--lib-fg);
+  font-size: 12px;
+  padding: 6px 8px;
+  outline: none;
+  text-align: right;
+}
+
+.settings-num:focus {
+  border-color: var(--pad-b);
+}
+
+.settings-unit {
+  font-size: 12px;
+  color: var(--lib-muted);
+}
+
+/* Sync & devices preview */
+
+.sync-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  margin-top: 8px;
+  padding: 12px;
+  border: 1px solid var(--lib-border);
+  border-radius: 10px;
+  background: var(--lib-hover);
+  font-size: 12px;
+}
+
+.sync-row {
+  display: flex;
+  gap: 10px;
+  align-items: baseline;
+}
+
+.sync-label {
+  flex: none;
+  width: 118px;
+  color: var(--lib-muted);
+  font-size: 11px;
+}
+
+.sync-mono {
+  font-family: Consolas, monospace;
+  font-size: 11px;
+  opacity: 0.85;
+}
+
+.sync-error {
+  color: var(--danger-fg);
+}
+
+.sync-peers {
+  margin-top: 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.sync-peer {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  padding: 5px 8px;
+  border-radius: 6px;
+  background: var(--lib-btn-bg);
+  border: 1px solid var(--lib-btn-border);
+}
+
+.sync-peer span:first-child {
+  flex: 1;
+}
+
+.sync-badge {
+  font-size: 10px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--lib-btn-border);
+  color: var(--lib-muted);
+}
+
+.sync-badge.same {
+  background: var(--pad-b);
+  border-color: var(--pad-b);
+  color: #fff;
+}
+
+/* Pairing */
+
+.pair-box {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px;
+  border: 1px dashed var(--pad-b);
+  border-radius: 8px;
+}
+
+.pair-code {
+  font-family: Consolas, monospace;
+  font-size: 22px;
+  letter-spacing: 2px;
+  text-align: center;
+  padding: 6px 0;
+  -webkit-user-select: text;
+  user-select: text;
+}
+
+.pair-safety {
+  font-family: Consolas, monospace;
+  font-size: 30px;
+  font-weight: 700;
+  letter-spacing: 4px;
+  text-align: center;
+  padding: 4px 0;
+  color: var(--pad-b);
+}
+
+.pair-actions,
+.pair-join {
+  display: flex;
+  gap: 8px;
+  justify-content: center;
+}
+
+.pair-join {
+  margin-top: 6px;
+}
+
+.pair-code-input {
+  width: 150px;
+  text-align: center;
+  font-family: Consolas, monospace;
+}
+
+.pair-done {
+  color: var(--pad-b);
+  font-weight: 600;
+  font-size: 13px;
+  text-align: center;
+}
+
+.sync-peer-block {
+  display: flex;
+  flex-direction: column;
+}
+
+.sync-peers-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.sync-status {
+  font-size: 11px;
+  color: var(--lib-muted);
+  padding: 2px 0 4px;
+}
+
+.relay-input {
+  width: 100%;
+  max-width: 260px;
+  text-align: left;
+}
+
+/* Tucked note: the window is a sliver in the screen edge; this overlay
+   catches hover (slide out) and click (pull back), and shows the title. */
+.tuck-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 60;
+  display: flex;
+  cursor: pointer;
+}
+.note-tucked .note-header,
+.note-tucked .note-canvas {
+  pointer-events: none;
+}
+.tuck-title {
+  background: rgba(20, 16, 8, 0.72);
+  color: #fff;
+  font: 600 12px/1.2 "Segoe UI", system-ui, sans-serif;
+  padding: 5px 10px;
+  border-radius: 999px;
+  max-width: 120px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  align-self: center;
+  margin: 10px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35);
+}
+.tuck-overlay[data-edge="left"] {
+  justify-content: flex-end;
+}
+.tuck-overlay[data-edge="right"] {
+  justify-content: flex-start;
+}
+.tuck-overlay[data-edge="top"] {
+  align-items: flex-end;
+  justify-content: center;
+}
+.tuck-overlay[data-edge="bottom"] {
+  align-items: flex-start;
+  justify-content: center;
+}
+
+.device-revoked {
+  opacity: 0.45;
+}
+.device-revoked > span:first-child {
+  text-decoration: line-through;
+}
+
+/* Paper texture picker */
+
+.paper-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(78px, 1fr));
+  gap: 10px;
+  margin-top: 8px;
+}
+
+.paper-btn {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 4px;
+  border: 2px solid transparent;
+  border-radius: 10px;
+  background: var(--lib-hover);
+  color: var(--lib-fg);
+  cursor: pointer;
+  font-size: 11px;
+}
+
+.paper-btn.active {
+  border-color: var(--pad-b);
+}
+
+.paper-preview {
+  width: 54px;
+  height: 40px;
+  border-radius: 5px;
+  background-color: var(--lib-bg);
+  border: 1px solid var(--lib-border);
+}
+
+.paper-tex-ruled {
+  background-image: repeating-linear-gradient(
+    to bottom,
+    transparent 0 9px,
+    var(--paper-line) 9px 10px
+  );
+}
+
+.paper-tex-dotted {
+  background-image: radial-gradient(var(--paper-line) 1px, transparent 1px);
+  background-size: 8px 8px;
+}
+
+.paper-tex-grid {
+  background-image: linear-gradient(to right, var(--paper-line) 1px, transparent 1px),
+    linear-gradient(to bottom, var(--paper-line) 1px, transparent 1px);
+  background-size: 9px 9px;
+}
+
+.paper-tex-dashed {
+  background-image: var(--tex-dashed);
+  background-size: 12px 12px;
+}
+
+.paper-tex-wavy {
+  background-image: var(--tex-wavy);
+  background-size: 12px 12px;
+}
+
+.paper-tex-zigzag {
+  background-image: var(--tex-zigzag);
+  background-size: 8px 12px;
+}
+
+.paper-tex-hearts {
+  background-image: var(--tex-hearts);
+  background-size: 14px 11px;
+}
+
+.paper-tex-stars {
+  background-image: var(--tex-stars);
+  background-size: 15px 12px;
+}
+
+.swatch-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(100px, 1fr));
+  gap: 10px;
+}
+
+.swatch {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 10px 6px 8px;
+  border: 2px solid transparent;
+  border-radius: 10px;
+  background: rgba(0, 0, 0, 0.03);
+  cursor: pointer;
+  font-size: 11px;
+  color: var(--lib-fg);
+}
+
+.swatch:hover {
+  background: rgba(0, 0, 0, 0.07);
+}
+
+.swatch.active {
+  border-color: var(--pad-b);
+  background: rgba(0, 0, 0, 0.05);
+}
+
+.swatch-pad {
+  width: 40px;
+  height: 8px;
+  border-radius: 4px;
+  background: linear-gradient(90deg, var(--pad-a), var(--pad-b));
+}
+
+.swatch-note {
+  width: 40px;
+  height: 26px;
+  border-radius: 5px;
+  background: var(--note-bg);
+  border: 1px solid var(--note-border);
+}
+
+/* ---------- Library ---------- */
+
+.library {
+  position: relative;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  background: var(--lib-bg);
+  color: var(--lib-fg);
+}
+
+.drop-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: color-mix(in srgb, var(--pad-b) 14%, var(--lib-bg));
+  border: 3px dashed var(--pad-b);
+  border-radius: 8px;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--lib-fg);
+  pointer-events: none;
+}
+
+.library-topbar {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  border-bottom: 2px solid var(--pad-b);
+}
+
+.library-count {
+  font-size: 11px;
+  color: var(--lib-muted);
+  white-space: nowrap;
+}
+
+.library-search {
+  flex: 1;
+  border: 1px solid var(--lib-btn-border);
+  border-radius: 8px;
+  background: var(--lib-btn-bg);
+  color: var(--lib-fg);
+  font-size: 13px;
+  padding: 8px 12px;
+  outline: none;
+}
+
+.library-select {
+  flex: none;
+  height: 34px;
+  border: 1px solid var(--lib-btn-border);
+  border-radius: 8px;
+  background: var(--lib-btn-bg);
+  color: var(--lib-fg);
+  font-size: 12px;
+  padding: 0 6px;
+  cursor: pointer;
+  outline: none;
+}
+
+/* Section headers when the grid is grouped by color or tag. */
+.stack-group-label {
+  margin: 14px 4px 6px;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--lib-muted);
+}
+
+.stack-group:first-child .stack-group-label {
+  margin-top: 2px;
+}
+
+.stack-group-count {
+  font-weight: 400;
+  opacity: 0.8;
+}
+
+.sticky-card-links {
+  cursor: help;
+}
+
+.library-icon-btn {
+  flex: none;
+  width: 34px;
+  height: 34px;
+  border: 1px solid var(--lib-btn-border);
+  border-radius: 8px;
+  background: var(--lib-btn-bg);
+  color: var(--lib-fg);
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.library-icon-btn:hover {
+  background: var(--lib-hover);
+  border-color: var(--pad-b);
+}
+
+.library-search:focus {
+  border-color: var(--pad-b);
+}
+
+.library-search::placeholder {
+  color: var(--lib-muted);
+}
+
+.library-btn {
+  border: 1px solid var(--lib-btn-border);
+  border-radius: 7px;
+  background: var(--lib-btn-bg);
+  color: var(--lib-fg);
+  font-size: 12px;
+  padding: 6px 12px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.library-btn:hover {
+  background: var(--note-bg);
+  color: var(--note-text);
+}
+
+/* Tag filter chips (derived from #hashtags in note text). */
+.tag-chips {
+  flex: none;
+  display: flex;
+  gap: 6px;
+  padding: 8px 12px;
+  overflow-x: auto;
+  border-bottom: 1px solid var(--lib-border);
+  scrollbar-width: none;
+}
+
+.tag-chips::-webkit-scrollbar {
+  display: none;
+}
+
+.tag-chip {
+  flex: none;
+  border: 1px solid var(--lib-btn-border);
+  border-radius: 999px;
+  background: var(--lib-btn-bg);
+  color: var(--lib-fg);
+  font-size: 11px;
+  padding: 4px 11px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.tag-chip:hover {
+  border-color: var(--pad-b);
+}
+
+.tag-chip.active {
+  background: var(--pad-b);
+  border-color: var(--pad-b);
+  color: #fff;
+  font-weight: 600;
+}
+
+.tag-count {
+  opacity: 0.65;
+  font-size: 10px;
+}
+
+.tag-chip.active .tag-count {
+  opacity: 0.85;
+}
+
+.library-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 10px 18px 18px;
+  background-attachment: local;
+}
+
+/* Smart tag-suggestion card: one glance, one click, easy to wave off. */
+.suggest-card {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 8px 18px 0;
+  padding: 8px 12px;
+  border: 1px solid var(--lib-border);
+  border-radius: 10px;
+  background: var(--lib-btn-bg);
+  font-size: 12px;
+  color: var(--lib-fg);
+}
+
+.suggest-icon {
+  flex: none;
+}
+
+.suggest-text {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.suggest-titles {
+  color: var(--lib-muted);
+}
+
+.suggest-accept {
+  border-color: var(--pad-b);
+}
+
+/* The related strip reuses the backlinks look; ≈ marks it as semantic. */
+.note-related .backlinks-label {
+  font-weight: 700;
+}
+
+/* Graph view fills the list area edge-to-edge, no scrolling. */
+.library-list-graph {
+  overflow: hidden;
+  padding: 0;
+  display: flex;
+}
+
+.graph-host {
+  flex: 1;
+  min-height: 0;
+  position: relative;
+}
+
+.graph-svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.graph-edge {
+  stroke: color-mix(in srgb, var(--lib-fg) 24%, transparent);
+  stroke-width: 1.2;
+}
+
+.graph-edge.dim {
+  stroke: color-mix(in srgb, var(--lib-fg) 8%, transparent);
+}
+
+.graph-node {
+  cursor: pointer;
+}
+
+/* Each node resolves --note-bg/--note-border via its own data-theme,
+   the same trick the sticky cards and swatches use. */
+.graph-dot {
+  fill: var(--note-bg);
+  stroke: var(--note-border);
+  stroke-width: 1.5;
+}
+
+.graph-node:hover .graph-dot {
+  stroke-width: 2.5;
+}
+
+.graph-label {
+  fill: var(--lib-fg);
+  font-size: 10px;
+  text-anchor: middle;
+  -webkit-user-select: none;
+  user-select: none;
+  pointer-events: none;
+}
+
+/* Notes with no links stay visible but recede. */
+.graph-node.isolated {
+  opacity: 0.4;
+}
+
+/* Nodes failing the search/tag filter recede further. */
+.graph-node.dim {
+  opacity: 0.15;
+}
+
+.library-icon-btn.active {
+  background: var(--lib-hover);
+  border-color: var(--pad-b);
+}
+
+/* Paper textures follow the picked palette via --paper-line. */
+body[data-paper="ruled"] .library-list {
+  background-image: repeating-linear-gradient(
+    to bottom,
+    transparent 0 27px,
+    var(--paper-line) 27px 28px
+  );
+}
+
+body[data-paper="dotted"] .library-list {
+  background-image: radial-gradient(var(--paper-line) 1.2px, transparent 1.2px);
+  background-size: 18px 18px;
+}
+
+body[data-paper="grid"] .library-list {
+  background-image: linear-gradient(to right, var(--paper-line) 1px, transparent 1px),
+    linear-gradient(to bottom, var(--paper-line) 1px, transparent 1px);
+  background-size: 24px 24px;
+}
+
+body[data-paper="dashed"] .library-list {
+  background-image: var(--tex-dashed);
+  background-size: 28px 28px;
+}
+
+body[data-paper="wavy"] .library-list {
+  background-image: var(--tex-wavy);
+  background-size: 28px 28px;
+}
+
+body[data-paper="zigzag"] .library-list {
+  background-image: var(--tex-zigzag);
+  background-size: 16px 28px;
+}
+
+body[data-paper="hearts"] .library-list {
+  background-image: var(--tex-hearts);
+  background-size: 34px 28px;
+}
+
+body[data-paper="stars"] .library-list {
+  background-image: var(--tex-stars);
+  background-size: 38px 30px;
+}
+
+.library-list::-webkit-scrollbar,
+.library-trash-list::-webkit-scrollbar {
+  width: 8px;
+}
+
+.library-list::-webkit-scrollbar-thumb,
+.library-trash-list::-webkit-scrollbar-thumb {
+  background: var(--lib-btn-border);
+  border-radius: 4px;
+}
+
+.library-list::-webkit-scrollbar-thumb:hover,
+.library-trash-list::-webkit-scrollbar-thumb:hover {
+  background: var(--pad-b);
+}
+
+.library-empty {
+  padding: 40px 0;
+  text-align: center;
+  color: var(--lib-muted);
+  font-size: 13px;
+}
+
+.library-empty-mascot {
+  display: block;
+  width: 88px;
+  margin: 0 auto 10px;
+  opacity: 0.85;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+.library-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 12px;
+  border-radius: 9px;
+}
+
+.library-row:hover {
+  background: var(--lib-hover);
+}
+
+.library-swatch {
+  flex: none;
+  width: 14px;
+  height: 14px;
+  border-radius: 4px;
+  background: var(--note-bg);
+  border: 1px solid var(--note-border);
+}
+
+.library-main {
+  flex: 1;
+  min-width: 0;
+}
+
+.library-title {
+  font-size: 13px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.library-title.empty {
+  color: var(--lib-muted);
+  font-style: italic;
+}
+
+.library-meta {
+  font-size: 11px;
+  color: var(--lib-muted);
+  margin-top: 2px;
+}
+
+/* ---------- Library stack view ---------- */
+
+.stack-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(172px, 1fr));
+  gap: 18px;
+  padding: 14px 6px 6px;
+}
+
+.sticky-card {
+  position: relative;
+  min-height: 150px;
+  display: flex;
+  flex-direction: column;
+  padding: 12px 12px 8px;
+  background: var(--note-bg);
+  border: 1px solid var(--note-border);
+  border-radius: 6px;
+  box-shadow: 1px 2px 6px rgba(40, 30, 0, 0.14);
+  transform: rotate(var(--tilt));
+  transition: transform 130ms ease-out, box-shadow 130ms ease-out;
+  color: var(--note-text);
+  /* Cards can be dragged out of the library onto the desktop. */
+  cursor: grab;
+  user-select: none;
+}
+
+.sticky-card:active {
+  cursor: grabbing;
+}
+
+.sticky-card:hover {
+  transform: rotate(0deg) translateY(-3px) scale(1.03);
+  box-shadow: 2px 6px 14px rgba(40, 30, 0, 0.22);
+  z-index: 1;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sticky-card,
+  .sticky-card:hover {
+    transform: none;
+    transition: none;
+  }
+}
+
+.sticky-card-text {
+  flex: 1;
+  font-size: 12px;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 6;
+  -webkit-box-orient: vertical;
+  word-break: break-word;
+}
+
+.sticky-card-text.empty {
+  font-style: italic;
+  opacity: 0.55;
+}
+
+/* Linked titles inside card previews, shown bracket-free as little chips. */
+.lib-link {
+  color: var(--note-link, #2563eb);
+  background: rgba(37, 99, 235, 0.09);
+  border-radius: 4px;
+  padding: 0 3px;
+}
+
+/* Card paper textures: global note-paper default, overridden per card. */
+body[data-note-paper="ruled"] .sticky-card-text,
+.sticky-card[data-paper="ruled"] .sticky-card-text {
+  background-image: repeating-linear-gradient(
+    to bottom,
+    transparent 0 16px,
+    var(--note-line) 16px 17px
+  );
+  background-position: 0 4px;
+}
+
+body[data-note-paper="dotted"] .sticky-card-text,
+.sticky-card[data-paper="dotted"] .sticky-card-text {
+  background-image: radial-gradient(var(--note-line) 1px, transparent 1px);
+  background-size: 13px 13px;
+}
+
+body[data-note-paper="grid"] .sticky-card-text,
+.sticky-card[data-paper="grid"] .sticky-card-text {
+  background-image: linear-gradient(to right, var(--note-line) 1px, transparent 1px),
+    linear-gradient(to bottom, var(--note-line) 1px, transparent 1px);
+  background-size: 15px 15px;
+}
+
+body[data-note-paper="dashed"] .sticky-card-text,
+.sticky-card[data-paper="dashed"] .sticky-card-text {
+  background-image: var(--tex-dashed);
+  background-size: 17px 17px;
+  background-position: 0 4px;
+}
+
+body[data-note-paper="wavy"] .sticky-card-text,
+.sticky-card[data-paper="wavy"] .sticky-card-text {
+  background-image: var(--tex-wavy);
+  background-size: 17px 17px;
+  background-position: 0 4px;
+}
+
+body[data-note-paper="zigzag"] .sticky-card-text,
+.sticky-card[data-paper="zigzag"] .sticky-card-text {
+  background-image: var(--tex-zigzag);
+  background-size: 10px 17px;
+  background-position: 0 4px;
+}
+
+body[data-note-paper="hearts"] .sticky-card-text,
+.sticky-card[data-paper="hearts"] .sticky-card-text {
+  background-image: var(--tex-hearts);
+  background-size: 22px 17px;
+  background-position: 2px 4px;
+}
+
+body[data-note-paper="stars"] .sticky-card-text,
+.sticky-card[data-paper="stars"] .sticky-card-text {
+  background-image: var(--tex-stars);
+  background-size: 25px 20px;
+}
+
+.sticky-card[data-paper="plain"] .sticky-card-text {
+  background-image: none;
+}
+
+.sticky-card-meta {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-top: 8px;
+  font-size: 10px;
+  opacity: 0.65;
+}
+
+.sticky-card-actions {
+  position: absolute;
+  inset: auto 8px 30px 8px;
+  display: flex;
+  justify-content: center;
+  gap: 6px;
+  opacity: 0;
+  transition: opacity 110ms ease-out;
+}
+
+.sticky-card:hover .sticky-card-actions {
+  opacity: 1;
+}
+
+/* Status + trash footer pinned to the bottom of the window. */
+.library-footer {
+  flex: none;
+  border-top: 1px solid var(--lib-border);
+  background: var(--lib-bg);
+}
+
+.library-status-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 5px 12px;
+  min-height: 34px;
+}
+
+.library-trash-controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.library-trash-controls .library-trash-toggle {
+  margin-top: 0;
+  border-top: none;
+  width: auto;
+  padding: 6px 8px;
+}
+
+.library-trash-list {
+  max-height: 200px;
+  overflow-y: auto;
+  padding: 0 10px 10px;
+}
+
+.library-btn-danger:hover {
+  background: rgba(200, 70, 70, 0.14);
+  border-color: rgba(200, 70, 70, 0.55);
+  color: var(--danger-fg);
+}
+
+.library-btn-danger.confirming {
+  background: rgba(200, 70, 70, 0.14);
+  border-color: rgba(200, 70, 70, 0.75);
+  color: var(--danger-fg);
+  font-weight: 600;
+}
+
+.library-trash-toggle {
+  display: block;
+  width: 100%;
+  text-align: left;
+  margin-top: 14px;
+  padding: 8px 12px;
+  border: none;
+  border-top: 1px solid var(--lib-border);
+  background: transparent;
+  color: var(--lib-muted);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.library-trash-toggle:hover {
+  color: var(--lib-fg);
+}
+
+.library-row-trashed {
+  opacity: 0.75;
+}

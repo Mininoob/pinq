@@ -1,0 +1,129 @@
+//! Content-addressed blob store (spec §18): bytes live at
+//! `app_data/blobs/<first-two-hex>/<blake3-hash>`, so identical content is
+//! stored exactly once, writes are atomic (temp + rename), and nothing in the
+//! store is ever mutated. Attachment metadata lives on notes; blobs are only
+//! bytes. Note windows read them via the `pinq-blob://` URI protocol.
+
+use std::io;
+use std::path::PathBuf;
+use tauri::{AppHandle, Manager};
+
+pub fn blobs_dir(app: &AppHandle) -> io::Result<PathBuf> {
+    let dir = app
+        .path()
+        .app_data_dir()
+        .map_err(io::Error::other)?
+        .join("blobs");
+    Ok(dir)
+}
+
+/// Store bytes, returning their hash. No-op if the blob already exists.
+pub fn store_blob(app: &AppHandle, bytes: &[u8]) -> io::Result<String> {
+    store_blob_in(&blobs_dir(app)?, bytes)
+}
+
+/// Resolve a hash to its blob path — None if malformed or missing.
+pub fn blob_path(app: &AppHandle, hash: &str) -> Option<PathBuf> {
+    blob_path_in(&blobs_dir(app).ok()?, hash)
+}
+
+/// Dir-parameterized core (testable without an AppHandle).
+pub fn store_blob_in(blobs: &std::path::Path, bytes: &[u8]) -> io::Result<String> {
+    let hash = blake3::hash(bytes).to_hex().to_string();
+    let dir = blobs.join(&hash[..2]);
+    std::fs::create_dir_all(&dir)?;
+    let path = dir.join(&hash);
+    if !path.exists() {
+        let tmp = dir.join(format!("{hash}.{}.tmp", std::process::id()));
+        std::fs::write(&tmp, bytes)?;
+        std::fs::rename(&tmp, &path)?;
+    }
+    Ok(hash)
+}
+
+pub fn blob_path_in(blobs: &std::path::Path, hash: &str) -> Option<PathBuf> {
+    if hash.len() != 64 || !hash.chars().all(|c| c.is_ascii_hexdigit()) {
+        return None;
+    }
+    let path = blobs.join(&hash[..2]).join(hash);
+    path.exists().then_some(path)
+}
+
+/// Garbage-collect blobs no note references anymore (purged notes, emptied
+/// trash). `min_age` protects blobs that were just written for ops still in
+/// flight to peers. Returns (files removed, bytes reclaimed). Blobs are
+/// content-addressed and never mutated, so deleting an unreferenced one can
+/// only ever cost a re-transfer if a peer re-introduces it.
+pub fn gc_blobs_in(
+    blobs: &std::path::Path,
+    referenced: &std::collections::HashSet<String>,
+    min_age: std::time::Duration,
+) -> (usize, u64) {
+    let mut removed = 0usize;
+    let mut bytes = 0u64;
+    let Ok(shards) = std::fs::read_dir(blobs) else { return (0, 0) };
+    for shard in shards.filter_map(|e| e.ok()) {
+        let Ok(files) = std::fs::read_dir(shard.path()) else { continue };
+        for entry in files.filter_map(|e| e.ok()) {
+            let path = entry.path();
+            let name = entry.file_name().to_string_lossy().to_string();
+            // Stale tmp files from interrupted writes are always fair game.
+            let is_tmp = name.contains(".tmp");
+            if !is_tmp && referenced.contains(&name) {
+                continue;
+            }
+            let Ok(meta) = entry.metadata() else { continue };
+            let old_enough = meta
+                .modified()
+                .ok()
+                .and_then(|t| t.elapsed().ok())
+                .map(|age| age >= min_age)
+                .unwrap_or(false);
+            if old_enough && std::fs::remove_file(&path).is_ok() {
+                removed += 1;
+                bytes += meta.len();
+            }
+        }
+    }
+    (removed, bytes)
+}
+
+/// App-level GC pass: everything any note (trash included) still references
+/// stays; the rest goes once it's a day old.
+pub fn gc(app: &AppHandle, store: &crate::store::Store) -> (usize, u64) {
+    let Ok(dir) = blobs_dir(app) else { return (0, 0) };
+    let referenced: std::collections::HashSet<String> = store
+        .all_notes()
+        .iter()
+        .flat_map(|n| n.attachments.iter().map(|a| a.hash.clone()))
+        .collect();
+    gc_blobs_in(&dir, &referenced, std::time::Duration::from_secs(24 * 60 * 60))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn gc_keeps_referenced_and_young_blobs() {
+        let dir = std::env::temp_dir().join(format!("pinq-blob-gc-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+
+        let keep = store_blob_in(&dir, b"still referenced").unwrap();
+        let drop_ = store_blob_in(&dir, b"orphaned bytes").unwrap();
+        let referenced: std::collections::HashSet<String> = [keep.clone()].into();
+
+        // With a min-age window, nothing is young enough to delete yet.
+        let (n, _) = gc_blobs_in(&dir, &referenced, std::time::Duration::from_secs(3600));
+        assert_eq!(n, 0, "fresh blobs are protected");
+
+        // With the window at zero, only the orphan goes.
+        let (n, bytes) = gc_blobs_in(&dir, &referenced, std::time::Duration::ZERO);
+        assert_eq!(n, 1);
+        assert_eq!(bytes, b"orphaned bytes".len() as u64);
+        assert!(blob_path_in(&dir, &keep).is_some());
+        assert!(blob_path_in(&dir, &drop_).is_none());
+        std::fs::remove_dir_all(dir).ok();
+    }
+}
