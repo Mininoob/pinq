@@ -40,9 +40,13 @@ pub fn run() {
         .manage(smart::SmartState::default())
         // Serves blob bytes to note webviews as pinq-blob://<hash>. Read-only,
         // hash-validated; images sniff fine without a precise content type.
+        // Responses are whole-file in memory, so blobs past the inline-media
+        // size are refused — the UI renders those as file chips, not players.
         .register_uri_scheme_protocol("pinq-blob", |ctx, request| {
+            const MAX_INLINE: u64 = 256 * 1024 * 1024;
             let hash = request.uri().path().trim_start_matches('/');
             match blobs::blob_path(&ctx.app_handle().clone(), hash)
+                .filter(|p| std::fs::metadata(p).map(|m| m.len() <= MAX_INLINE).unwrap_or(false))
                 .and_then(|p| std::fs::read(p).ok())
             {
                 Some(bytes) => tauri::http::Response::builder()
@@ -89,6 +93,8 @@ pub fn run() {
             attachments::attach_image_base64,
             attachments::attach_files,
             attachments::open_attachment,
+            attachments::attachment_ready,
+            attachments::save_attachment,
             notes::peek_note,
             notes::untuck_note,
             notes::add_text_item,

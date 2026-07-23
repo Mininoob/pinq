@@ -572,21 +572,41 @@ export default function Note(props: { id: string }) {
     window.addEventListener("keydown", trackCtrl);
     window.addEventListener("keyup", trackCtrl);
     window.addEventListener("blur", dropCtrl);
-    // Files dropped onto the note land where they were dropped.
+    // Files dropped onto the note land where they were dropped. Enter/over
+    // light the note up so it reads as a drop target; anything that can't be
+    // attached is reported in a flash chip instead of vanishing silently.
     unlistenDrop = await getCurrentWebview().onDragDropEvent((event) => {
-      if (event.payload.type !== "drop") return;
+      if (event.payload.type === "enter" || event.payload.type === "over") {
+        setDropHover(true);
+        return;
+      }
+      if (event.payload.type === "leave") {
+        setDropHover(false);
+        return;
+      }
+      setDropHover(false);
       const pos = event.payload.position;
       const scale = window.devicePixelRatio || 1;
       const p = canvasPoint(pos.x / scale, pos.y / scale);
       const paths = event.payload.paths;
+      if (!paths.length) {
+        // Drags from browsers/mail clients carry data, not real file paths.
+        flash("Nothing attachable — drag files from your file manager");
+        return;
+      }
       void (async () => {
-        const added = await invoke<CanvasItem[]>("attach_files", {
-          id: props.id,
-          paths,
-          x: p.x,
-          y: p.y,
-        });
-        if (added.length) setItems([...items(), ...added]);
+        try {
+          const res = await invoke<{ added: CanvasItem[]; skipped: string[] }>("attach_files", {
+            id: props.id,
+            paths,
+            x: p.x,
+            y: p.y,
+          });
+          if (res.added.length) setItems([...items(), ...res.added]);
+          if (res.skipped.length) flash(`Skipped ${res.skipped.join(", ")}`);
+        } catch (e) {
+          flash(`Couldn't attach: ${e}`);
+        }
       })();
     });
   });
@@ -971,6 +991,35 @@ export default function Note(props: { id: string }) {
   const openAtt = (a: AttachmentRef) =>
     void invoke("open_attachment", { hash: a.hash, name: a.name });
 
+  // ----- drop feedback + attachment download -----
+
+  const [dropHover, setDropHover] = createSignal(false);
+  const [flashMsg, setFlashMsg] = createSignal<string | null>(null);
+  let flashTimer: number | undefined;
+  const flash = (msg: string) => {
+    setFlashMsg(msg);
+    clearTimeout(flashTimer);
+    flashTimer = window.setTimeout(() => setFlashMsg(null), 5000);
+  };
+
+  const fmtSize = (n: number) =>
+    n >= 1 << 30
+      ? `${(n / (1 << 30)).toFixed(1)} GB`
+      : n >= 1 << 20
+        ? `${(n / (1 << 20)).toFixed(1)} MB`
+        : n >= 1024
+          ? `${Math.round(n / 1024)} KB`
+          : `${n} B`;
+
+  const saveAtt = async (a: AttachmentRef) => {
+    try {
+      await invoke<string>("save_attachment", { hash: a.hash, name: a.name });
+      flash(`Saved ${a.name} to Downloads`);
+    } catch (e) {
+      flash(String(e));
+    }
+  };
+
   // ----- note-level commands (unchanged) -----
 
   const untag = (tag: string) => {
@@ -1130,16 +1179,39 @@ export default function Note(props: { id: string }) {
 
   const AttachmentView = (p: { item: () => Extract<CanvasItem, { type: "attachment" }> }) => {
     const a = () => p.item().attachment;
+    // Inline players load the whole blob through the pinq-blob protocol, so
+    // oversized media falls back to a plain file chip (open/save still work).
+    const INLINE_MEDIA_MAX = 200 * 1024 * 1024;
     const kind = () => {
+      if (a().size > INLINE_MEDIA_MAX) return "file";
       const m = a().mime;
       if (m.startsWith("image/")) return "image";
       if (m.startsWith("video/")) return "video";
       if (m.startsWith("audio/")) return "audio";
       return "file";
     };
+    // Items sync ahead of their bytes: a chip can land here before the blob
+    // does. Poll until the blob arrives, showing a "syncing" placeholder.
+    const [ready, setReady] = createSignal(true);
+    let readyTimer: number | undefined;
+    const checkReady = async () => {
+      const ok = await invoke<boolean>("attachment_ready", { hash: a().hash });
+      setReady(ok);
+      if (!ok) readyTimer = window.setTimeout(() => void checkReady(), 2000);
+    };
+    onMount(() => void checkReady());
+    onCleanup(() => clearTimeout(readyTimer));
     return (
       <>
-        <Show when={kind() === "image"}>
+        <Show when={!ready()}>
+          <div class="att-file-row att-syncing" title={`${a().name} — syncing from your other device`}>
+            <span class="att-chip">
+              ⏳ <span class="att-chip-name">{a().name}</span>
+              <span class="att-chip-size">syncing…</span>
+            </span>
+          </div>
+        </Show>
+        <Show when={ready() && kind() === "image"}>
           <img
             class="att-img"
             src={blobUrl(a().hash)}
@@ -1154,20 +1226,30 @@ export default function Note(props: { id: string }) {
             }
           />
         </Show>
-        <Show when={kind() === "video"}>
+        <Show when={ready() && kind() === "video"}>
           <video class="att-video" controls preload="metadata" src={blobUrl(a().hash)} />
         </Show>
-        <Show when={kind() === "audio"}>
+        <Show when={ready() && kind() === "audio"}>
           <audio class="att-audio" controls src={blobUrl(a().hash)} />
         </Show>
-        <Show when={kind() === "file"}>
-          <button
-            class="att-chip"
-            title={`${a().name} — drag to move, click to open`}
-            onPointerDown={(e) => startMediaDrag(e, p.item(), () => openAtt(a()))}
-          >
-            📎 <span class="att-chip-name">{a().name}</span>
-          </button>
+        <Show when={ready() && kind() === "file"}>
+          <div class="att-file-row">
+            <button
+              class="att-chip"
+              title={`${a().name} — drag to move, click to open`}
+              onPointerDown={(e) => startMediaDrag(e, p.item(), () => openAtt(a()))}
+            >
+              📎 <span class="att-chip-name">{a().name}</span>
+              <span class="att-chip-size">{fmtSize(a().size)}</span>
+            </button>
+            <button
+              class="att-dl"
+              title="Save a copy to Downloads"
+              onClick={() => void saveAtt(a())}
+            >
+              ⬇
+            </button>
+          </div>
         </Show>
       </>
     );
@@ -1176,7 +1258,7 @@ export default function Note(props: { id: string }) {
   return (
     <div
       class="note"
-      classList={{ "note-tucked": !!tucked(), "ctrl-down": ctrlHeld() }}
+      classList={{ "note-tucked": !!tucked(), "ctrl-down": ctrlHeld(), "drop-hover": dropHover() }}
       onKeyDown={onKeyDown}
       onPaste={onPaste}
     >
@@ -1573,6 +1655,11 @@ export default function Note(props: { id: string }) {
         <button class="note-undo-chip" onClick={undoDelete}>
           Deleted — <b>Undo</b>
         </button>
+      </Show>
+      <Show when={flashMsg()}>
+        <div class="note-flash-chip" role="status">
+          {flashMsg()}
+        </div>
       </Show>
       <Show when={backlinks().length > 0}>
         <div class="note-backlinks" title="Notes that link here">

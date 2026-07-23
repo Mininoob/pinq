@@ -212,6 +212,21 @@ pub fn open_with_default(path: &std::path::Path) -> std::io::Result<()> {
     std::process::Command::new(cmd).arg(path).spawn().map(|_| ())
 }
 
+/// Show a file selected in its folder — Explorer `/select,`, Finder `open -R`,
+/// or the parent directory where selection isn't supported.
+pub fn reveal_in_folder(path: &std::path::Path) -> std::io::Result<()> {
+    #[cfg(windows)]
+    return std::process::Command::new("explorer")
+        .arg("/select,")
+        .arg(path)
+        .spawn()
+        .map(|_| ());
+    #[cfg(target_os = "macos")]
+    return std::process::Command::new("open").arg("-R").arg(path).spawn().map(|_| ());
+    #[cfg(all(unix, not(target_os = "macos")))]
+    open_with_default(path.parent().unwrap_or(path))
+}
+
 /// Returns the export folder path.
 #[tauri::command]
 pub fn export_all(app: AppHandle, store: State<'_, Arc<Store>>) -> Result<String, String> {

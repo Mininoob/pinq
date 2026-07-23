@@ -2042,59 +2042,92 @@ fn missing_blob_hashes(store: &Store, blobs: &Path) -> Vec<String> {
     hashes
 }
 
-/// Serve requested blobs in chunks; unknown hashes are skipped silently
-/// (the requester just stays missing until another peer has them).
+/// Serve requested blobs in chunks, streaming from disk so multi-GB blobs
+/// never sit in memory; unknown hashes are skipped silently (the requester
+/// just stays missing until another peer has them).
 fn send_blobs(chan: &mut SecureChan, blobs: &Path, hashes: &[String]) -> Result<(), String> {
     use base64::Engine;
+    use std::io::Read;
     let b64 = base64::engine::general_purpose::STANDARD;
     for hash in hashes {
         let Some(path) = crate::blobs::blob_path_in(blobs, hash) else { continue };
-        let Ok(bytes) = std::fs::read(&path) else { continue };
-        let chunks: Vec<&[u8]> = if bytes.is_empty() { vec![&[]] } else { bytes.chunks(BLOB_CHUNK).collect() };
-        let last = chunks.len() - 1;
-        for (i, chunk) in chunks.iter().enumerate() {
+        let Ok(mut file) = std::fs::File::open(&path) else { continue };
+        let mut buf = vec![0u8; BLOB_CHUNK];
+        loop {
+            let mut n = 0;
+            // Fill the chunk fully (plain read may return short counts).
+            while n < BLOB_CHUNK {
+                match file.read(&mut buf[n..]).map_err(|e| e.to_string())? {
+                    0 => break,
+                    k => n += k,
+                }
+            }
+            // A short (even empty) chunk is the final one — always sent, so
+            // exact-multiple sizes still deliver their `last` marker.
+            let last = n < BLOB_CHUNK;
             chan.send(&serde_json::json!({
                 "type": "blob",
                 "hash": hash,
-                "last": i == last,
-                "data": b64.encode(chunk),
+                "last": last,
+                "data": b64.encode(&buf[..n]),
             }))
             .map_err(ioerr)?;
+            if last {
+                break;
+            }
         }
     }
     chan.send(&serde_json::json!({ "type": "blob_end" })).map_err(ioerr)
 }
 
-/// Receive blob chunks until the end marker; store each completed blob
-/// (content-addressed, so a corrupt or mismatched transfer simply doesn't
-/// land under the requested hash).
+/// Receive blob chunks until the end marker, streaming each blob straight to
+/// a temp file (content-addressed, so a corrupt or mismatched transfer simply
+/// doesn't land under the requested hash).
 fn recv_blobs(chan: &mut SecureChan, blobs: &Path) -> Result<usize, String> {
-    let mut pending: HashMap<String, Vec<u8>> = HashMap::new();
+    let mut pending: HashMap<String, crate::blobs::IncomingBlob> = HashMap::new();
     let mut stored = 0usize;
-    loop {
+    let result = (|| loop {
         let frame = chan.recv().map_err(ioerr)?;
         match frame.get("type").and_then(|t| t.as_str()) {
             Some("blob") => {
                 let hash = frame.get("hash").and_then(|h| h.as_str()).unwrap_or_default().to_string();
                 let data = b64f(&frame, "data").map_err(ioerr)?;
-                let buf = pending.entry(hash.clone()).or_default();
-                if buf.len() + data.len() > 512 * 1024 * 1024 {
-                    return Err("blob too large".into());
+                let incoming = match pending.entry(hash.clone()) {
+                    std::collections::hash_map::Entry::Occupied(e) => e.into_mut(),
+                    std::collections::hash_map::Entry::Vacant(e) => e.insert(
+                        crate::blobs::IncomingBlob::new(blobs).map_err(|e| e.to_string())?,
+                    ),
+                };
+                if incoming.size + data.len() as u64 > crate::attachments::MAX_FILE_BYTES + BLOB_CHUNK as u64 {
+                    return Err("blob too large".to_string());
                 }
-                buf.extend_from_slice(&data);
+                incoming.write(&data).map_err(|e| e.to_string())?;
                 if frame.get("last").and_then(|l| l.as_bool()).unwrap_or(false) {
-                    let bytes = pending.remove(&hash).unwrap_or_default();
-                    match crate::blobs::store_blob_in(blobs, &bytes) {
-                        Ok(actual) if actual == hash => stored += 1,
-                        _ => eprintln!("pinq: discarded blob with mismatched hash from peer"),
+                    if let Some(incoming) = pending.remove(&hash) {
+                        match incoming.finish() {
+                            Ok(actual) if actual == hash => stored += 1,
+                            Ok(actual) => {
+                                // Landed under its true hash but nothing references
+                                // it — drop it rather than leave junk for GC.
+                                if let Some(p) = crate::blobs::blob_path_in(blobs, &actual) {
+                                    let _ = std::fs::remove_file(p);
+                                }
+                                eprintln!("pinq: discarded blob with mismatched hash from peer");
+                            }
+                            Err(e) => eprintln!("pinq: failed to store synced blob: {e}"),
+                        }
                     }
                 }
             }
-            Some("blob_end") => break,
+            Some("blob_end") => break Ok(stored),
             other => return Err(format!("unexpected frame {other:?} during blob exchange")),
         }
+    })();
+    // Half-received blobs from an aborted session don't linger as tmp files.
+    for (_, incoming) in pending {
+        incoming.discard();
     }
-    Ok(stored)
+    result
 }
 
 /// Initiator half of a sync session. Fixed sequence (no interleaving needed):

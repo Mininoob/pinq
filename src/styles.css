@@ -1224,6 +1224,86 @@ body[data-note-paper="stars"] .note-canvas {
   opacity: 1;
 }
 
+/* File chip + its download button, side by side. */
+.att-file-row {
+  display: flex;
+  align-items: stretch;
+  gap: 4px;
+  width: 100%;
+}
+
+.att-file-row .att-chip {
+  flex: 1;
+  min-width: 0;
+}
+
+.att-chip-size {
+  margin-left: auto;
+  flex: none;
+  font-size: 10px;
+  opacity: 0.6;
+  white-space: nowrap;
+}
+
+.att-dl {
+  flex: none;
+  width: 28px;
+  border: 1px solid var(--note-border);
+  border-radius: 5px;
+  background: var(--note-bg);
+  color: var(--note-text);
+  font-size: 12px;
+  cursor: pointer;
+  padding: 0;
+  box-shadow: 0 1px 4px rgba(40, 30, 0, 0.12);
+}
+
+.att-dl:hover {
+  color: var(--pad-a);
+  border-color: var(--pad-a);
+}
+
+/* Chip whose bytes haven't arrived from a paired device yet. */
+.att-syncing {
+  opacity: 0.55;
+  animation: att-syncing-pulse 1.6s ease-in-out infinite;
+}
+
+.att-syncing .att-chip {
+  cursor: default;
+}
+
+@keyframes att-syncing-pulse {
+  50% {
+    opacity: 0.85;
+  }
+}
+
+/* The whole note lights up while a file drag hovers over it. */
+.note.drop-hover {
+  outline: 2px dashed var(--pad-a);
+  outline-offset: -4px;
+}
+
+/* Transient status line (skipped files, saved-to-Downloads, sync waits). */
+.note-flash-chip {
+  position: absolute;
+  bottom: 10px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 9;
+  max-width: calc(100% - 24px);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  border-radius: 999px;
+  padding: 5px 14px;
+  background: var(--toast-bg);
+  color: var(--toast-fg);
+  font-size: 12px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25);
+  white-space: nowrap;
+}
+
 /* [[Note link]] autocomplete popup, anchored under the text box being typed in. */
 .link-menu {
   position: absolute;
