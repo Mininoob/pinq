@@ -46,6 +46,12 @@ const SYNC_TICK: Duration = Duration::from_secs(1);
 const SYNC_REFRESH_MS: u64 = 60_000;
 /// Back off failing peers.
 const SYNC_RETRY_MS: u64 = 15_000;
+/// Presence: how often the open-note set is re-broadcast unchanged, and how
+/// long a peer's set is believed without a refresh (crash/offline expiry).
+const PRESENCE_RESEND_MS: u64 = 10_000;
+const PRESENCE_TTL_MS: u64 = 25_000;
+/// Reject presence frames older than this (replay bound / clock skew).
+const PRESENCE_MAX_AGE_MS: u64 = 30_000;
 
 fn hex(bytes: &[u8]) -> String {
     bytes.iter().map(|b| format!("{b:02x}")).collect()
@@ -205,6 +211,14 @@ pub struct SyncState {
     pub relay_host_info: Mutex<Option<RelayHostInfo>>,
     /// Kill switch for the hosted relay's accept loop.
     pub relay_host_flag: Mutex<Option<Arc<std::sync::atomic::AtomicBool>>>,
+    /// Live co-editing presence: device_short -> (peer's open note ids, received_at_ms).
+    pub peer_open_notes: Mutex<HashMap<String, (std::collections::HashSet<String>, u64)>>,
+    /// Union of peer open-sets at the last recompute (drives pinq-live events).
+    pub last_live: Mutex<std::collections::HashSet<String>>,
+    /// Peers to sync with immediately (a live note was edited); drained per tick.
+    pub live_push: Mutex<std::collections::HashSet<String>>,
+    /// Wakes run_sync_loop out of its 1s tick. Set once by init().
+    pub sync_wake: Mutex<Option<std::sync::mpsc::Sender<()>>>,
 }
 
 #[derive(Clone, Serialize)]
@@ -824,6 +838,10 @@ pub fn init(app: &AppHandle) {
         relay_status: Mutex::new(None),
         relay_host_info: Mutex::new(None),
         relay_host_flag: Mutex::new(None),
+        peer_open_notes: Mutex::new(HashMap::new()),
+        last_live: Mutex::new(Default::default()),
+        live_push: Mutex::new(Default::default()),
+        sync_wake: Mutex::new(None),
     };
     app.manage(state);
 
@@ -845,12 +863,18 @@ pub fn init(app: &AppHandle) {
         std::thread::spawn(move || run_listener(app));
     }
     {
+        let (wake_tx, wake_rx) = std::sync::mpsc::channel::<()>();
+        *app.state::<SyncState>().sync_wake.lock().unwrap() = Some(wake_tx);
         let app = app.clone();
-        std::thread::spawn(move || run_sync_loop(app));
+        std::thread::spawn(move || run_sync_loop(app, wake_rx));
     }
     {
         let app = app.clone();
         std::thread::spawn(move || run_relay_loop(app));
+    }
+    {
+        let app = app.clone();
+        std::thread::spawn(move || run_presence_loop(app));
     }
 }
 
@@ -1049,6 +1073,11 @@ fn accept_loop(app: AppHandle, listener: TcpListener) {
 
             if first.get("type").and_then(|t| t.as_str()) == Some("pair_request") {
                 handle_pair_request(&app, stream, &first);
+                return;
+            }
+
+            if first.get("type").and_then(|t| t.as_str()) == Some("presence") {
+                handle_presence(&app, &first);
                 return;
             }
 
@@ -1445,6 +1474,207 @@ pub fn open_envelope(space_key: &[u8; 32], bytes: &[u8]) -> Result<EnvelopePaylo
         .decrypt(&nonce.into(), &bytes[13..])
         .map_err(|_| "envelope decrypt failed (wrong space key or tampered)".to_string())?;
     serde_json::from_slice(&plain).map_err(|e| e.to_string())
+}
+
+// ---------- live-editing presence ----------
+//
+// Each device broadcasts which notes it has open; a note open on both ends of
+// a pair is "live" — the frontend tightens its edit debounce and commits wake
+// the sync loop immediately (see note_edited). Presence is advisory: a forged
+// or replayed frame can only cause extra (correct, vv-gated) sync sessions
+// and a tighter debounce, and frames are sealed under a space-key-derived key
+// so non-space peers can neither read nor forge them.
+
+#[derive(serde::Serialize, serde::Deserialize)]
+struct PresencePayload {
+    device_short: String,
+    open: Vec<String>,
+    at_ms: u64,
+}
+
+fn presence_key(space_key: &[u8; 32]) -> blake3::Hash {
+    blake3::keyed_hash(space_key, b"pinq-presence-v1")
+}
+
+fn seal_presence(space_key: &[u8; 32], payload: &PresencePayload) -> Result<Vec<u8>, String> {
+    use chacha20poly1305::{aead::Aead, ChaCha20Poly1305, KeyInit};
+    let cipher = ChaCha20Poly1305::new(presence_key(space_key).as_bytes().into());
+    let mut nonce = [0u8; 12];
+    getrandom::fill(&mut nonce).map_err(|e| e.to_string())?;
+    let plain = serde_json::to_vec(payload).map_err(|e| e.to_string())?;
+    let ct = cipher
+        .encrypt(&nonce.into(), plain.as_slice())
+        .map_err(|_| "presence encrypt failed".to_string())?;
+    let mut out = Vec::with_capacity(13 + ct.len());
+    out.push(1); // presence format version
+    out.extend_from_slice(&nonce);
+    out.extend_from_slice(&ct);
+    Ok(out)
+}
+
+fn open_presence(space_key: &[u8; 32], bytes: &[u8]) -> Result<PresencePayload, String> {
+    use chacha20poly1305::{aead::Aead, ChaCha20Poly1305, KeyInit};
+    if bytes.len() < 14 || bytes[0] != 1 {
+        return Err("not a v1 presence frame".into());
+    }
+    let nonce: [u8; 12] = bytes[1..13].try_into().unwrap();
+    let cipher = ChaCha20Poly1305::new(presence_key(space_key).as_bytes().into());
+    let plain = cipher
+        .decrypt(&nonce.into(), &bytes[13..])
+        .map_err(|_| "presence decrypt failed".to_string())?;
+    serde_json::from_slice(&plain).map_err(|e| e.to_string())
+}
+
+/// Incoming "presence" frame: decode, drop silently unless it's from our
+/// space and fresh, then record the peer's open set.
+fn handle_presence(app: &AppHandle, first: &serde_json::Value) {
+    use base64::Engine;
+    let Some(state) = app.try_state::<SyncState>() else { return };
+    let Some(data) = first.get("data").and_then(|d| d.as_str()) else { return };
+    let Ok(bytes) = base64::engine::general_purpose::STANDARD.decode(data) else { return };
+    let space_key = *state.space_key.lock().unwrap();
+    let Ok(payload) = open_presence(&space_key, &bytes) else { return };
+    let now = pinq_core::now_ms();
+    if now.abs_diff(payload.at_ms) > PRESENCE_MAX_AGE_MS {
+        return;
+    }
+    state
+        .peer_open_notes
+        .lock()
+        .unwrap()
+        .insert(payload.device_short, (payload.open.into_iter().collect(), now));
+    recompute_live(app);
+}
+
+/// Diff the union of live peer open-sets against the last one and tell each
+/// affected note window whether it's now co-open on another device.
+fn recompute_live(app: &AppHandle) {
+    let Some(state) = app.try_state::<SyncState>() else { return };
+    let now = pinq_core::now_ms();
+    let union: std::collections::HashSet<String> = state
+        .peer_open_notes
+        .lock()
+        .unwrap()
+        .values()
+        .filter(|(_, at)| now.saturating_sub(*at) <= PRESENCE_TTL_MS)
+        .flat_map(|(set, _)| set.iter().cloned())
+        .collect();
+    let prev = std::mem::replace(&mut *state.last_live.lock().unwrap(), union.clone());
+    for id in union.symmetric_difference(&prev) {
+        let _ = app.emit(
+            "pinq-live",
+            serde_json::json!({ "noteId": id, "live": union.contains(id) }),
+        );
+    }
+}
+
+/// True while any live (non-expired) peer has this note open.
+#[tauri::command]
+pub fn note_is_live(state: State<'_, SyncState>, id: String) -> bool {
+    let now = pinq_core::now_ms();
+    state
+        .peer_open_notes
+        .lock()
+        .unwrap()
+        .values()
+        .any(|(set, at)| now.saturating_sub(*at) <= PRESENCE_TTL_MS && set.contains(&id))
+}
+
+/// A content op just committed for `note_id`. If any live peer has that note
+/// open, target it for an immediate session and wake the sync loop — the
+/// session itself is still the ordinary vv-delta exchange.
+pub fn note_edited(app: &AppHandle, note_id: &str) {
+    let Some(state) = app.try_state::<SyncState>() else { return };
+    let now = pinq_core::now_ms();
+    let targets: Vec<String> = state
+        .peer_open_notes
+        .lock()
+        .unwrap()
+        .iter()
+        .filter(|(_, (set, at))| {
+            now.saturating_sub(*at) <= PRESENCE_TTL_MS && set.contains(note_id)
+        })
+        .map(|(dev, _)| dev.clone())
+        .collect();
+    if targets.is_empty() {
+        return;
+    }
+    state.live_push.lock().unwrap().extend(targets);
+    let tx = state.sync_wake.lock().unwrap().clone();
+    if let Some(tx) = tx {
+        let _ = tx.send(());
+    }
+}
+
+/// Every second: expire stale peer presence, and (re)send our own open-note
+/// set to same-space peers when it changes or every PRESENCE_RESEND_MS.
+fn run_presence_loop(app: AppHandle) {
+    use base64::Engine;
+    let mut last_sent: Option<(std::collections::BTreeSet<String>, u64)> = None;
+    loop {
+        std::thread::sleep(Duration::from_secs(1));
+        let Some(state) = app.try_state::<SyncState>() else { continue };
+
+        // Expire peers that stopped refreshing (crash, offline, note closed
+        // forever) so live mode falls back to the normal cadence.
+        let now = pinq_core::now_ms();
+        let expired = {
+            let mut map = state.peer_open_notes.lock().unwrap();
+            let before = map.len();
+            map.retain(|_, (_, at)| now.saturating_sub(*at) <= PRESENCE_TTL_MS);
+            map.len() != before
+        };
+        if expired {
+            recompute_live(&app);
+        }
+
+        let open: std::collections::BTreeSet<String> = app
+            .webview_windows()
+            .keys()
+            .filter_map(|l| crate::notes::label_to_id(l).map(str::to_string))
+            .collect();
+        let due = match &last_sent {
+            Some((set, at)) => *set != open || now.saturating_sub(*at) >= PRESENCE_RESEND_MS,
+            None => true,
+        };
+        if !due {
+            continue;
+        }
+
+        let tag = state.current_tag.lock().unwrap().clone();
+        let peers: Vec<PeerInfo> = state
+            .peers
+            .lock()
+            .unwrap()
+            .values()
+            .filter(|p| !tag.is_empty() && p.tag == tag && !p.addr.is_empty())
+            .cloned()
+            .collect();
+        if peers.is_empty() {
+            // Nothing to tell; still remember the set so a peer arriving later
+            // gets it via the RESEND window.
+            last_sent = Some((open, now));
+            continue;
+        }
+
+        let space_key = *state.space_key.lock().unwrap();
+        let payload = PresencePayload {
+            device_short: state.device_short.clone(),
+            open: open.iter().cloned().collect(),
+            at_ms: now,
+        };
+        let Ok(sealed) = seal_presence(&space_key, &payload) else { continue };
+        let frame = serde_json::json!({
+            "type": "presence",
+            "data": base64::engine::general_purpose::STANDARD.encode(sealed),
+        });
+        for peer in peers {
+            if let Ok((mut stream, _)) = connect_peer(&peer_candidates(&peer)) {
+                let _ = write_frame(&mut stream, &frame);
+            }
+        }
+        last_sent = Some((open, now));
+    }
 }
 
 // ---------- space re-key (cryptographic eviction) ----------
@@ -2086,14 +2316,20 @@ fn vv_fingerprint(store: &Store) -> String {
 /// The pump: every few seconds, sync with each same-space peer whose view of
 /// us is stale — after local edits, on a "Sync now" click, or at least once a
 /// minute to pick up remote-only changes. Peers that fail back off briefly.
-fn run_sync_loop(app: AppHandle) {
+fn run_sync_loop(app: AppHandle, wake_rx: std::sync::mpsc::Receiver<()>) {
     let mut memo: HashMap<String, (String, u64)> = HashMap::new(); // dev -> (vv fp at last success, last attempt)
     loop {
-        std::thread::sleep(SYNC_TICK);
+        // Tick every second, or immediately when a live-note commit wakes us.
+        match wake_rx.recv_timeout(SYNC_TICK) {
+            Ok(()) | Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {}
+            Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => std::thread::sleep(SYNC_TICK),
+        }
+        while wake_rx.try_recv().is_ok() {} // coalesce queued wakes
         let Some(state) = app.try_state::<SyncState>() else { continue };
         let Some(store) = app.try_state::<Arc<Store>>() else { continue };
         let Ok(blobs) = crate::blobs::blobs_dir(&app) else { continue };
         let asap = state.sync_asap.swap(false, std::sync::atomic::Ordering::Relaxed);
+        let live_targets = std::mem::take(&mut *state.live_push.lock().unwrap());
 
         let tag = state.current_tag.lock().unwrap().clone();
         let peers: Vec<PeerInfo> = state
@@ -2113,9 +2349,15 @@ fn run_sync_loop(app: AppHandle) {
             let now = pinq_core::now_ms();
             let (last_fp, last_at) =
                 memo.get(&peer.device_short).cloned().unwrap_or_default();
-            let due =
-                asap || last_fp != local_fp || now.saturating_sub(last_at) > SYNC_REFRESH_MS;
-            if !due || (!asap && now.saturating_sub(last_at) < SYNC_RETRY_MS) {
+            // Live peers (they have the just-edited note open) bypass the
+            // retry cooldown so keystrokes propagate at debounce + RTT speed;
+            // everyone else keeps the polite cadence.
+            let is_live = live_targets.contains(&peer.device_short);
+            let due = asap
+                || is_live
+                || last_fp != local_fp
+                || now.saturating_sub(last_at) > SYNC_REFRESH_MS;
+            if !due || (!asap && !is_live && now.saturating_sub(last_at) < SYNC_RETRY_MS) {
                 continue;
             }
             {

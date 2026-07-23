@@ -196,7 +196,13 @@ pub fn spawn_pad_watchdog(app: AppHandle) {
                             }
                         }
                         if !fs_hidden {
-                            let _ = win.show();
+                            // show() on macOS is makeKeyAndOrderFront: — it steals
+                            // keyboard focus from whatever note is being typed in.
+                            // Only show a pad that is actually hidden; on error,
+                            // skip (never steal focus on a guess).
+                            if matches!(win.is_visible(), Ok(false)) {
+                                let _ = win.show();
+                            }
                             let _ = win.set_always_on_top(true);
                         }
                     }

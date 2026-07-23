@@ -41,13 +41,24 @@ pub fn apply(app: &AppHandle) {
                 .unwrap_or(false);
             #[cfg(not(windows))]
             let off_desktop = false;
+            // show() only when actually hidden: on macOS show() is
+            // makeKeyAndOrderFront:, which would yank keyboard focus from the
+            // window being typed in on every apply() pass.
             let _ = if is_parked || off_desktop || user_hidden || fs_hidden {
                 win.hide()
-            } else {
+            } else if matches!(win.is_visible(), Ok(false)) {
                 win.show()
+            } else {
+                Ok(())
             };
         } else if crate::pad::is_pad_label(&label) {
-            let _ = if fs_hidden { win.hide() } else { win.show() };
+            let _ = if fs_hidden {
+                win.hide()
+            } else if matches!(win.is_visible(), Ok(false)) {
+                win.show()
+            } else {
+                Ok(())
+            };
         }
     }
 }

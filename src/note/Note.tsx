@@ -186,6 +186,8 @@ export default function Note(props: { id: string }) {
   const [remind, setRemind] = createSignal<number | null>(null);
   const [history, setHistory] = createSignal<HistoryEntry[]>([]);
   const [tucked, setTucked] = createSignal<string | null>(null);
+  // True while another device has this note open — sync goes near-realtime.
+  const [live, setLive] = createSignal(false);
   const placeholder = randomPhrase();
   let canvas!: HTMLDivElement;
   let dragging = false;
@@ -197,6 +199,7 @@ export default function Note(props: { id: string }) {
   let unlistenSync: UnlistenFn | undefined;
   let unlistenTuck: UnlistenFn | undefined;
   let unlistenSmart: UnlistenFn | undefined;
+  let unlistenLive: UnlistenFn | undefined;
 
   // First non-empty line of the first text box — the tucked note's tab label.
   const tuckTitle = () => {
@@ -476,7 +479,8 @@ export default function Note(props: { id: string }) {
   const scheduleCommit = (itemId: string, text: string) => {
     pendingText.set(itemId, text);
     clearTimeout(timers.get(itemId));
-    timers.set(itemId, window.setTimeout(() => void commitItem(itemId), 400));
+    // Live co-editing: commit faster so the peer sees keystrokes sooner.
+    timers.set(itemId, window.setTimeout(() => void commitItem(itemId), live() ? 150 : 400));
   };
 
   const flushAll = async () => {
@@ -527,6 +531,11 @@ export default function Note(props: { id: string }) {
       await newTextItemAt(8, 8);
       seededId = items()[0]?.item_id ?? null;
     }
+    // Live co-editing: know whether a peer has this note open too.
+    setLive(await invoke<boolean>("note_is_live", { id: props.id }));
+    unlistenLive = await listen<{ noteId: string; live: boolean }>("pinq-live", (e) => {
+      if (e.payload.noteId === props.id) setLive(e.payload.live);
+    });
     // A throw is about to move this window; save any pending edits first.
     unlisten = await listen("pinq-flush", () => void flushAll());
     // Thrown at an edge: switch to the tucked tab presentation.
@@ -597,6 +606,7 @@ export default function Note(props: { id: string }) {
     unlistenSync?.();
     unlistenTuck?.();
     unlistenSmart?.();
+    unlistenLive?.();
     clearTimeout(undoChipTimer);
   });
 
@@ -1205,6 +1215,12 @@ export default function Note(props: { id: string }) {
         <div class="note-grip">
           <span /><span /><span />
         </div>
+        <Show when={live()}>
+          <span
+            class="note-live-dot"
+            title="This note is open on another device — syncing live"
+          />
+        </Show>
         <button
           class="note-remind-btn"
           classList={{ armed: remind() !== null }}

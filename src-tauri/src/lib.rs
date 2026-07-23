@@ -121,6 +121,7 @@ pub fn run() {
             sync::pairing_cancel,
             sync::pair_request,
             sync::pair_respond,
+            sync::note_is_live,
             smart::smart_status,
             smart::related_notes,
             smart::tag_suggestions,

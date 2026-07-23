@@ -375,6 +375,21 @@ body[data-mode="dark"] {
   background: var(--note-ink);
 }
 
+/* Open on another device — syncing live. */
+.note-live-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #34c759;
+  flex-shrink: 0;
+  animation: note-live-pulse 2s ease-in-out infinite;
+}
+
+@keyframes note-live-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.45; }
+}
+
 .note-trash {
   position: absolute;
   left: 4px;

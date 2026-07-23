@@ -318,6 +318,7 @@ pub fn restore_note(store: State<'_, Arc<Store>>, id: String) -> Result<(), Stri
 /// Create a text box on the note's canvas at (x, y).
 #[tauri::command]
 pub fn add_text_item(
+    app: AppHandle,
     store: State<'_, Arc<Store>>,
     id: String,
     x: f64,
@@ -327,6 +328,7 @@ pub fn add_text_item(
 ) -> Result<pinq_core::CanvasItem, String> {
     let item = pinq_core::CanvasItem::text_item(x, y, w, text);
     store.add_item(&id, item.clone()).map_err(|e| e.to_string())?;
+    crate::sync::note_edited(&app, &id);
     Ok(item)
 }
 
@@ -341,11 +343,13 @@ pub fn set_item_text(
     let old_title = store.get(&id).map(|n| crate::links::title_of(&n)).unwrap_or_default();
     store.set_item_text(&id, &item_id, text).map_err(|e| e.to_string())?;
     crate::links::sync_links_after_edit(&app, &store, &id, &old_title);
+    crate::sync::note_edited(&app, &id);
     Ok(())
 }
 
 #[tauri::command]
 pub fn move_item(
+    app: AppHandle,
     store: State<'_, Arc<Store>>,
     id: String,
     item_id: String,
@@ -353,7 +357,9 @@ pub fn move_item(
     y: f64,
     w: f64,
 ) -> Result<(), String> {
-    store.move_item(&id, &item_id, x, y, w).map_err(|e| e.to_string())
+    store.move_item(&id, &item_id, x, y, w).map_err(|e| e.to_string())?;
+    crate::sync::note_edited(&app, &id);
+    Ok(())
 }
 
 #[tauri::command]
@@ -384,6 +390,7 @@ pub fn remove_item(
     let old_title = store.get(&id).map(|n| crate::links::title_of(&n)).unwrap_or_default();
     store.remove_item(&id, &item_id).map_err(|e| e.to_string())?;
     crate::links::sync_links_after_edit(&app, &store, &id, &old_title);
+    crate::sync::note_edited(&app, &id);
     Ok(())
 }
 
@@ -401,6 +408,7 @@ pub fn restore_item(
     let old_title = store.get(&id).map(|n| crate::links::title_of(&n)).unwrap_or_default();
     store.add_item(&id, item).map_err(|e| e.to_string())?;
     crate::links::sync_links_after_edit(&app, &store, &id, &old_title);
+    crate::sync::note_edited(&app, &id);
     Ok(())
 }
 
@@ -595,6 +603,7 @@ pub fn save_note_text(
     let old_title = store.get(&id).map(|n| crate::links::title_of(&n)).unwrap_or_default();
     store.set_text(&id, text).map_err(|e| e.to_string())?;
     crate::links::sync_links_after_edit(&app, &store, &id, &old_title);
+    crate::sync::note_edited(&app, &id);
     Ok(())
 }
 
