@@ -1011,17 +1011,28 @@ fn run_discovery(app: AppHandle) {
 /// a SPAKE2 `msg` routes to pairing (only while a host session is armed);
 /// a `sync_hello` routes to a sync session (gated by space-key possession —
 /// the AEAD handshake, not this router, is the security boundary).
+///
+/// Dual-stack: discovery advertises every address of every family, and IPv4
+/// and IPv6 are separate sockets on macOS/Windows — listening on only one
+/// family answers "connection refused" to peers dialing the other. Bind both;
+/// one family failing is fine (e.g. Linux dual-stack sockets collide, and the
+/// v4 bind already covers both there).
 fn run_listener(app: AppHandle) {
-    let listener = match TcpListener::bind(("0.0.0.0", SYNC_PORT)) {
-        Ok(l) => l,
-        Err(e) => {
-            if let Some(s) = app.try_state::<SyncState>() {
-                *s.discovery_error.lock().unwrap() =
-                    Some(format!("sync listener failed: {e}"));
-            }
-            return;
+    let v4 = TcpListener::bind(("0.0.0.0", SYNC_PORT));
+    let v6 = TcpListener::bind(("::", SYNC_PORT));
+    if let (Err(e), Err(_)) = (&v4, &v6) {
+        if let Some(s) = app.try_state::<SyncState>() {
+            *s.discovery_error.lock().unwrap() = Some(format!("sync listener failed: {e}"));
         }
-    };
+        return;
+    }
+    for listener in [v4, v6].into_iter().flatten() {
+        let app = app.clone();
+        std::thread::spawn(move || accept_loop(app, listener));
+    }
+}
+
+fn accept_loop(app: AppHandle, listener: TcpListener) {
     for stream in listener.incoming() {
         let Ok(mut stream) = stream else { continue };
         let app = app.clone();
