@@ -1850,6 +1850,12 @@ body[data-note-paper="stars"] .note-canvas {
   border-radius: 8px;
 }
 
+/* Incoming "wants to pair" prompt: solid accent so it reads as a question. */
+.pair-request {
+  border-style: solid;
+  background: color-mix(in srgb, var(--pad-a) 10%, transparent);
+}
+
 .pair-code {
   font-family: Consolas, monospace;
   font-size: 22px;

@@ -119,6 +119,8 @@ pub fn run() {
             sync::pairing_join,
             sync::pairing_confirm,
             sync::pairing_cancel,
+            sync::pair_request,
+            sync::pair_respond,
             smart::smart_status,
             smart::related_notes,
             smart::tag_suggestions,

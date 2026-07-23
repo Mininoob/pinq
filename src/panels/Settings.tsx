@@ -1,5 +1,6 @@
-import { createSignal, For, onCleanup, onMount, Show } from "solid-js";
+import { createSignal, For, Index, onCleanup, onMount, Show } from "solid-js";
 import { invoke } from "@tauri-apps/api/core";
+import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import type { PinqSettings } from "../theme";
 
 interface SyncInfo {
@@ -37,6 +38,8 @@ interface PairingUi {
   safety: string | null;
   status: string | null;
   error: string | null;
+  /** Name of a device asking to pair with this one (Accept/Decline prompt). */
+  request: string | null;
 }
 
 interface DeviceView {
@@ -119,9 +122,10 @@ export default function Settings() {
   const [removeArm, setRemoveArm] = createSignal<string | null>(null);
   const [rotateArm, setRotateArm] = createSignal(false);
   const [rotateMsg, setRotateMsg] = createSignal<string | null>(null);
-  const [joinTarget, setJoinTarget] = createSignal<string | null>(null);
-  const [joinCode, setJoinCode] = createSignal("");
+  // The peer we clicked "Pair" on, so its row can show the waiting hint.
+  const [requestAddr, setRequestAddr] = createSignal<string | null>(null);
   let syncTimer: number | undefined;
+  let unlistenPair: UnlistenFn | undefined;
 
   onMount(async () => {
     setSettings(await invoke<PinqSettings>("get_settings"));
@@ -133,20 +137,36 @@ export default function Settings() {
     };
     void poll();
     syncTimer = window.setInterval(() => void poll(), 1500);
+    // Incoming pair requests show up instantly, not on the next poll.
+    unlistenPair = await listen("pinq-pair-request", async () => {
+      setPairing(await invoke<PairingUi>("pairing_state"));
+    });
   });
 
-  onCleanup(() => clearInterval(syncTimer));
+  onCleanup(() => {
+    clearInterval(syncTimer);
+    unlistenPair?.();
+  });
 
   const hostStart = async () => {
     await invoke("pairing_host_start");
     setPairing(await invoke<PairingUi>("pairing_state"));
   };
 
-  const join = async (addr: string) => {
-    if (!joinCode().trim()) return;
-    await invoke("pairing_join", { addr, code: joinCode() });
-    setJoinTarget(null);
-    setJoinCode("");
+  // Click-to-pair: ask the other device; its user accepts, the code exchanges
+  // automatically, and both sides land on the safety-number confirm.
+  const requestPair = async (addr: string) => {
+    setRequestAddr(addr);
+    try {
+      await invoke("pair_request", { addr });
+    } catch {
+      // Already pairing — the state below will say so.
+    }
+    setPairing(await invoke<PairingUi>("pairing_state"));
+  };
+
+  const respond = async (accept: boolean) => {
+    await invoke("pair_respond", { accept });
     setPairing(await invoke<PairingUi>("pairing_state"));
   };
 
@@ -429,12 +449,33 @@ export default function Settings() {
                 <div class="sync-row sync-error">Discovery: {s().discoveryError}</div>
               </Show>
 
+              <Show when={pairing()?.request}>
+                <div class="pair-box pair-request">
+                  <p class="settings-hint">
+                    <b>“{pairing()?.request}”</b> wants to pair with this device.
+                  </p>
+                  <div class="pair-actions">
+                    <button class="library-btn" onClick={() => void respond(true)}>
+                      Accept
+                    </button>
+                    <button
+                      class="library-btn library-btn-danger"
+                      onClick={() => void respond(false)}
+                    >
+                      Decline
+                    </button>
+                  </div>
+                </div>
+              </Show>
+
               <Show
                 when={pairing()?.active}
                 fallback={
-                  <button class="library-btn" onClick={() => void hostStart()}>
-                    Add device
-                  </button>
+                  <Show when={!pairing()?.request}>
+                    <button class="library-btn" onClick={() => void hostStart()}>
+                      Add device
+                    </button>
+                  </Show>
                 }
               >
                 <div class="pair-box">
@@ -442,11 +483,16 @@ export default function Settings() {
                     <p class="settings-hint">Enter on your other device (tap Pair there):</p>
                     <div class="pair-code">{pairing()?.code}</div>
                   </Show>
+                  <Show when={pairing()?.status === "requesting"}>
+                    <p class="settings-hint">Waiting for the other device to accept…</p>
+                  </Show>
                   <Show when={pairing()?.status === "connecting"}>
                     <p class="settings-hint">Connecting…</p>
                   </Show>
                   <Show when={pairing()?.status === "confirm"}>
-                    <p class="settings-hint">Same number on both devices?</p>
+                    <p class="settings-hint">
+                      Same number on the other device? Confirm only if they match.
+                    </p>
                     <div class="pair-safety">{pairing()?.safety}</div>
                     <div class="pair-actions">
                       <button class="library-btn" onClick={pairConfirm}>
@@ -479,30 +525,32 @@ export default function Settings() {
                 <span class="sync-label">
                   Devices in this space ({devices().filter((d) => !d.revoked).length})
                 </span>
-                <For each={devices()}>
+                {/* <Index>, not <For>: the 1.5s poll rebuilds these arrays and
+                    <For>'s referential keying would recreate every row. */}
+                <Index each={devices()}>
                   {(d) => (
-                    <div class="sync-peer" classList={{ "device-revoked": d.revoked }}>
+                    <div class="sync-peer" classList={{ "device-revoked": d().revoked }}>
                       <span>
-                        {d.name} <span class="sync-mono">({d.short})</span>
+                        {d().name} <span class="sync-mono">({d().short})</span>
                       </span>
-                      <Show when={d.isSelf}>
+                      <Show when={d().isSelf}>
                         <span class="sync-badge same">this device</span>
                       </Show>
-                      <Show when={d.revoked}>
+                      <Show when={d().revoked}>
                         <span class="sync-badge">removed</span>
                       </Show>
-                      <Show when={!d.isSelf && !d.revoked}>
+                      <Show when={!d().isSelf && !d().revoked}>
                         <button
                           class="library-btn"
-                          classList={{ "library-btn-danger": removeArm() === d.pk }}
-                          onClick={() => void removeDevice(d.pk)}
+                          classList={{ "library-btn-danger": removeArm() === d().pk }}
+                          onClick={() => void removeDevice(d().pk)}
                         >
-                          {removeArm() === d.pk ? "Really remove?" : "Remove"}
+                          {removeArm() === d().pk ? "Really remove?" : "Remove"}
                         </button>
                       </Show>
                     </div>
                   )}
-                </For>
+                </Index>
                 <p class="settings-hint">
                   After removing a device, rotate the key to fully lock it out.
                 </p>
@@ -531,32 +579,34 @@ export default function Settings() {
                     </button>
                   </Show>
                 </div>
-                <For
+                {/* <Index>, not <For> — see the devices list above. */}
+                <Index
                   each={s().peers}
                   fallback={<p class="settings-hint">None found yet.</p>}
                 >
                   {(p) => (
                     <div class="sync-peer-block">
                       <div class="sync-peer">
-                        <span>{p.deviceName}</span>
-                        <span class="sync-mono">{p.addr}</span>
+                        <span>{p().deviceName}</span>
+                        <span class="sync-mono">{p().addr}</span>
                         <span
                           class="sync-badge"
-                          classList={{ same: p.sameSpace }}
-                          title={p.sameSpace ? "Same space" : "Different space"}
+                          classList={{ same: p().sameSpace }}
+                          title={p().sameSpace ? "Same space" : "Different space"}
                         >
-                          {p.sameSpace ? "same space" : "other space"}
+                          {p().sameSpace ? "same space" : "other space"}
                         </span>
-                        <Show when={!p.sameSpace && !pairing()?.active}>
+                        <Show when={!p().sameSpace && !pairing()?.active}>
                           <button
                             class="library-btn"
-                            onClick={() => setJoinTarget(joinTarget() === p.addr ? null : p.addr)}
+                            title="Ask this device to pair — its user accepts, then both confirm a matching number"
+                            onClick={() => void requestPair(p().addr)}
                           >
-                            Pair…
+                            Pair
                           </button>
                         </Show>
                       </div>
-                      <Show when={p.sameSpace && p.lastSync}>
+                      <Show when={p().sameSpace && p().lastSync}>
                         {(ls) => (
                           <div class="sync-status" classList={{ "sync-error": !ls().ok }}>
                             {ls().ok
@@ -568,23 +618,16 @@ export default function Settings() {
                           </div>
                         )}
                       </Show>
-                      <Show when={joinTarget() === p.addr}>
-                        <div class="pair-join">
-                          <input
-                            class="settings-num pair-code-input"
-                            placeholder="xxxx-xxxx-xxxx"
-                            value={joinCode()}
-                            onInput={(e) => setJoinCode(e.currentTarget.value)}
-                            onKeyDown={(e) => e.key === "Enter" && void join(p.addr)}
-                          />
-                          <button class="library-btn" onClick={() => void join(p.addr)}>
-                            Join
-                          </button>
-                        </div>
+                      <Show
+                        when={
+                          pairing()?.status === "requesting" && requestAddr() === p().addr
+                        }
+                      >
+                        <div class="sync-status">Waiting for “{p().deviceName}” to accept…</div>
                       </Show>
                     </div>
                   )}
-                </For>
+                </Index>
               </div>
 
               <div class="sync-peers">

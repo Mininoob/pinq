@@ -97,6 +97,12 @@ pub struct SyncStatus {
     pub pushed: usize,
 }
 
+/// An incoming click-to-pair request awaiting the user's Accept/Decline.
+pub struct IncomingPair {
+    pub name: String,
+    pub reply_tx: std::sync::mpsc::Sender<bool>,
+}
+
 pub struct PairingSession {
     pub role: &'static str, // "host" | "joiner"
     pub code: Option<String>,
@@ -122,6 +128,9 @@ pub struct SyncState {
     pub discovery_error: Mutex<Option<String>>,
     pub peers: Mutex<HashMap<String, PeerInfo>>,
     pub pairing: Mutex<Option<PairingSession>>,
+    /// An unanswered "wants to pair with you" from another device; the
+    /// listener thread blocks on `reply_tx`'s channel until the user answers.
+    pub pair_req: Mutex<Option<IncomingPair>>,
     /// Peers (by device_short) with a sync session in flight — one at a time each.
     pub syncing: Mutex<std::collections::HashSet<String>>,
     /// Last session outcome per peer.
@@ -190,6 +199,8 @@ pub struct PairingUi {
     safety: Option<String>,
     status: Option<String>,
     error: Option<String>,
+    /// Name of a device asking to pair with THIS one (Accept/Decline prompt).
+    request: Option<String>,
 }
 
 // ---------- commands ----------
@@ -256,6 +267,9 @@ pub async fn pairing_state(state: State<'_, SyncState>) -> Result<PairingUi, ()>
             guard.as_mut().unwrap().error = Some("pairing timed out".into());
         }
     }
+    drop(guard);
+    let request = state.pair_req.lock().unwrap().as_ref().map(|r| r.name.clone());
+    let guard = state.pairing.lock().unwrap();
     Ok(match guard.as_ref() {
         None => PairingUi {
             active: false,
@@ -264,6 +278,7 @@ pub async fn pairing_state(state: State<'_, SyncState>) -> Result<PairingUi, ()>
             safety: None,
             status: None,
             error: None,
+            request,
         },
         Some(s) => PairingUi {
             active: true,
@@ -272,13 +287,13 @@ pub async fn pairing_state(state: State<'_, SyncState>) -> Result<PairingUi, ()>
             safety: s.safety.clone(),
             status: Some(s.status.clone()),
             error: s.error.clone(),
+            request,
         },
     })
 }
 
-/// Host side: arm a one-time pairing session and show the code.
-#[tauri::command]
-pub fn pairing_host_start(state: State<'_, SyncState>) -> Result<String, String> {
+/// Mint a one-time code and arm a host pairing session around it.
+fn arm_host_session(state: &SyncState) -> Result<String, String> {
     let mut code_bytes = [0u8; 6];
     getrandom::fill(&mut code_bytes).map_err(|e| e.to_string())?;
     let raw = hex(&code_bytes);
@@ -293,6 +308,87 @@ pub fn pairing_host_start(state: State<'_, SyncState>) -> Result<String, String>
         started_ms: pinq_core::now_ms(),
     });
     Ok(code)
+}
+
+/// Host side: arm a one-time pairing session and show the code.
+#[tauri::command]
+pub fn pairing_host_start(state: State<'_, SyncState>) -> Result<String, String> {
+    arm_host_session(&state)
+}
+
+/// Click-to-pair, requester side: ask the device at `addr` to pair with us.
+/// If its user accepts, it arms a host session and sends back the session
+/// code, and we join automatically. The code travels in the clear, so the
+/// SECURITY GATE is the 6-digit safety-number comparison both users must
+/// confirm before any key material moves — an interceptor produces different
+/// numbers on the two screens.
+#[tauri::command]
+pub fn pair_request(
+    app: AppHandle,
+    state: State<'_, SyncState>,
+    addr: String,
+) -> Result<(), String> {
+    {
+        let guard = state.pairing.lock().unwrap();
+        if matches!(guard.as_ref(), Some(s) if s.status != "done" && s.status != "failed") {
+            return Err("a pairing is already in progress".into());
+        }
+    }
+    *state.pairing.lock().unwrap() = Some(PairingSession {
+        role: "joiner",
+        code: None,
+        safety: None,
+        status: "requesting".into(),
+        error: None,
+        confirm_tx: None,
+        started_ms: pinq_core::now_ms(),
+    });
+    let name = state.device_name.clone();
+    std::thread::spawn(move || {
+        let result = (|| -> Result<(), String> {
+            let mut stream = TcpStream::connect(&addr).map_err(|e| format!("connect: {e}"))?;
+            stream.set_write_timeout(Some(Duration::from_secs(20))).ok();
+            // The other user gets 60s to answer; give the reply a little more.
+            stream.set_read_timeout(Some(Duration::from_secs(75))).ok();
+            write_frame(
+                &mut stream,
+                &serde_json::json!({ "type": "pair_request", "name": name }),
+            )
+            .map_err(|e| e.to_string())?;
+            let reply = read_frame(&mut stream).map_err(|_| "no answer".to_string())?;
+            match reply.get("type").and_then(|t| t.as_str()) {
+                Some("pair_accept") => {
+                    let code = reply
+                        .get("code")
+                        .and_then(|c| c.as_str())
+                        .ok_or("malformed accept")?
+                        .replace('-', "")
+                        .to_lowercase();
+                    let s = app.state::<SyncState>();
+                    s.set_pairing_status("connecting", None);
+                    drop(stream); // the SPAKE2 join opens its own connection
+                    run_joiner(&app, &addr, &code)
+                }
+                Some("pair_decline") => Err("the other device declined".into()),
+                _ => Err("unexpected reply".into()),
+            }
+        })();
+        if let Err(e) = result {
+            if let Some(s) = app.try_state::<SyncState>() {
+                s.set_pairing_status("failed", Some(e));
+            }
+        }
+    });
+    Ok(())
+}
+
+/// Accepting side: answer the pending "wants to pair" prompt.
+#[tauri::command]
+pub fn pair_respond(state: State<'_, SyncState>, accept: bool) {
+    let req = state.pair_req.lock().unwrap().take();
+    if let Some(r) = req {
+        let _ = r.reply_tx.send(accept);
+    }
 }
 
 /// Joiner side: connect to a discovered peer and pair with its code.
@@ -653,6 +749,7 @@ pub fn init(app: &AppHandle) {
         discovery_error: Mutex::new(None),
         peers: Mutex::new(HashMap::new()),
         pairing: Mutex::new(None),
+        pair_req: Mutex::new(None),
         syncing: Mutex::new(Default::default()),
         last_sync: Mutex::new(HashMap::new()),
         sync_asap: std::sync::atomic::AtomicBool::new(false),
@@ -868,6 +965,11 @@ fn run_listener(app: AppHandle) {
                 return;
             }
 
+            if first.get("type").and_then(|t| t.as_str()) == Some("pair_request") {
+                handle_pair_request(&app, stream, &first);
+                return;
+            }
+
             if first.get("msg").is_some() {
                 let armed = {
                     let Some(s) = app.try_state::<SyncState>() else { return };
@@ -884,6 +986,67 @@ fn run_listener(app: AppHandle) {
                 }
             }
         });
+    }
+}
+
+/// Another device clicked "Pair" on us: surface an Accept/Decline prompt and
+/// hold the connection open until the user answers (or 60s passes). On accept
+/// we arm a normal host session and hand its code back — the requester joins
+/// with it automatically and the flow becomes the ordinary SPAKE2 →
+/// safety-number → confirm path.
+fn handle_pair_request(app: &AppHandle, mut stream: TcpStream, first: &serde_json::Value) {
+    let Some(state) = app.try_state::<SyncState>() else { return };
+    let name = first
+        .get("name")
+        .and_then(|n| n.as_str())
+        .unwrap_or("Another device")
+        .chars()
+        .take(40)
+        .collect::<String>();
+
+    // Busy: one pairing (or one prompt) at a time.
+    let busy = {
+        let pairing = state.pairing.lock().unwrap();
+        matches!(pairing.as_ref(), Some(s) if s.status != "done" && s.status != "failed")
+    } || state.pair_req.lock().unwrap().is_some();
+    if busy {
+        let _ = write_frame(&mut stream, &serde_json::json!({ "type": "pair_decline" }));
+        return;
+    }
+
+    let (tx, rx) = std::sync::mpsc::channel();
+    *state.pair_req.lock().unwrap() = Some(IncomingPair { name: name.clone(), reply_tx: tx });
+    let _ = app.emit("pinq-pair-request", &name);
+    {
+        use tauri_plugin_notification::NotificationExt;
+        let _ = app
+            .notification()
+            .builder()
+            .title("Pinq pairing")
+            .body(format!("“{name}” wants to pair with this device — open Settings"))
+            .show();
+    }
+
+    stream.set_write_timeout(Some(Duration::from_secs(20))).ok();
+    let accepted = rx.recv_timeout(Duration::from_secs(60)).unwrap_or(false);
+    // Clear the prompt whichever way this went (pair_respond may have taken it
+    // already; a timeout leaves it behind for us to clean up).
+    let _ = state.pair_req.lock().unwrap().take();
+
+    if !accepted {
+        let _ = write_frame(&mut stream, &serde_json::json!({ "type": "pair_decline" }));
+        return;
+    }
+    match arm_host_session(&state) {
+        Ok(code) => {
+            let _ = write_frame(
+                &mut stream,
+                &serde_json::json!({ "type": "pair_accept", "code": code }),
+            );
+        }
+        Err(_) => {
+            let _ = write_frame(&mut stream, &serde_json::json!({ "type": "pair_decline" }));
+        }
     }
 }
 
