@@ -739,6 +739,21 @@ fn get_or_create_secret(app: &AppHandle, name: &str) -> std::io::Result<([u8; 32
     use base64::Engine;
     let b64 = base64::engine::general_purpose::STANDARD;
 
+    // A key file from an earlier credential-store denial IS this device's
+    // identity — prefer it, and never let a permission prompt decide which
+    // keys we run with (on macOS, every rebuilt binary re-prompts to read
+    // the keychain, and answering "allow" would resurrect older keys and
+    // silently unpair the device).
+    let dir = app.path().app_data_dir().map_err(std::io::Error::other)?.join("keys");
+    let path = dir.join(format!("{name}.key"));
+    if let Ok(existing) = std::fs::read(&path) {
+        if existing.len() == 32 {
+            let mut key = [0u8; 32];
+            key.copy_from_slice(&existing);
+            return Ok((key, "file"));
+        }
+    }
+
     if let Ok(entry) = keyring::Entry::new("Pinq", name) {
         match entry.get_password() {
             Ok(stored) => {
@@ -781,14 +796,21 @@ fn get_or_create_secret(app: &AppHandle, name: &str) -> std::io::Result<([u8; 32
 fn set_secret(app: &AppHandle, name: &str, key: &[u8; 32]) -> std::io::Result<()> {
     use base64::Engine;
     let b64 = base64::engine::general_purpose::STANDARD;
+    // Mirror get_or_create_secret: a device whose identity lives in a key
+    // file must keep writing there — a rotation stored in the keychain would
+    // be invisible to the file-first reads.
+    let dir = app.path().app_data_dir().map_err(std::io::Error::other)?.join("keys");
+    let path = dir.join(format!("{name}.key"));
+    if path.exists() {
+        return std::fs::write(&path, key);
+    }
     if let Ok(entry) = keyring::Entry::new("Pinq", name) {
         if entry.set_password(&b64.encode(key)).is_ok() {
             return Ok(());
         }
     }
-    let dir = app.path().app_data_dir().map_err(std::io::Error::other)?.join("keys");
     std::fs::create_dir_all(&dir)?;
-    std::fs::write(dir.join(format!("{name}.key")), key)
+    std::fs::write(&path, key)
 }
 
 // ---------- init ----------
