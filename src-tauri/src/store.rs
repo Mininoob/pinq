@@ -44,6 +44,10 @@ pub struct Store {
     /// Replication actor id: random, minted once per database, independent of the
     /// crypto device key (so tests and key rotation never re-attribute ops).
     device_id: String,
+    /// Fires after every local content commit (wakes the sync loop).
+    commit_hook: std::sync::OnceLock<Box<dyn Fn() + Send + Sync>>,
+    /// Fires with the ids of notes a remote sync introduced (arrival toast).
+    arrivals_hook: std::sync::OnceLock<Box<dyn Fn(&[NoteId]) + Send + Sync>>,
 }
 
 /// One op as it travels between devices: origin identity plus the action JSON.
@@ -427,6 +431,8 @@ impl Store {
             presentation: Mutex::new(presentation),
             pending_place: Mutex::new(HashMap::new()),
             device_id,
+            commit_hook: std::sync::OnceLock::new(),
+            arrivals_hook: std::sync::OnceLock::new(),
         })
     }
 
@@ -570,7 +576,24 @@ impl Store {
             tx.commit().map_err(db_err)?;
         }
         pinq_core::apply(&mut self.notes.lock().unwrap(), action);
+        // Every local content commit nudges the sync loop (hook wired at
+        // setup; no-op in tests). Remote applies don't come through here,
+        // so there's no sync ping-pong.
+        if let Some(hook) = self.commit_hook.get() {
+            hook();
+        }
         Ok(())
+    }
+
+    /// Called after every local content commit. Set once at app setup.
+    pub fn set_commit_hook(&self, f: impl Fn() + Send + Sync + 'static) {
+        let _ = self.commit_hook.set(Box::new(f));
+    }
+
+    /// Called with the ids of notes a remote sync introduced (previously
+    /// unknown here, now live). Set once at app setup.
+    pub fn set_arrivals_hook(&self, f: impl Fn(&[NoteId]) + Send + Sync + 'static) {
+        let _ = self.arrivals_hook.set(Box::new(f));
     }
 
     /// Max ctr per device across the whole op-log — "everything I know about".
@@ -623,6 +646,10 @@ impl Store {
         }
         let mut affected: std::collections::BTreeSet<NoteId> = Default::default();
         let mut rebuilt: Vec<(NoteId, Option<NoteState>)> = Vec::new();
+        // Snapshot which notes exist before the merge, so brand-new arrivals
+        // (created on another device) can be told apart from edits.
+        let known: std::collections::HashSet<NoteId> =
+            self.notes.lock().unwrap().keys().cloned().collect();
         {
             let mut conn = self.db.lock().unwrap();
             let tx = conn.transaction().map_err(db_err)?;
@@ -647,16 +674,27 @@ impl Store {
             }
             tx.commit().map_err(db_err)?;
         }
-        let mut notes = self.notes.lock().unwrap();
-        for (id, state) in rebuilt {
-            match state {
-                Some(n) => {
-                    notes.insert(id, n);
+        let mut arrivals: Vec<NoteId> = Vec::new();
+        {
+            let mut notes = self.notes.lock().unwrap();
+            for (id, state) in rebuilt {
+                match state {
+                    Some(n) => {
+                        if !known.contains(&id) && !n.trashed {
+                            arrivals.push(id.clone());
+                        }
+                        notes.insert(id, n);
+                    }
+                    None => {
+                        notes.remove(&id);
+                        self.pending_place.lock().unwrap().remove(&id);
+                    }
                 }
-                None => {
-                    notes.remove(&id);
-                    self.pending_place.lock().unwrap().remove(&id);
-                }
+            }
+        }
+        if !arrivals.is_empty() {
+            if let Some(hook) = self.arrivals_hook.get() {
+                hook(&arrivals);
             }
         }
         Ok(affected.into_iter().collect())
@@ -1641,6 +1679,49 @@ mod tests {
     fn sync_a_to_b(a: &Store, b: &Store) -> Vec<String> {
         let ops = a.ops_missing_from(&b.version_vector().unwrap()).unwrap();
         b.apply_remote_ops(&ops).unwrap()
+    }
+
+    #[test]
+    fn hooks_fire_on_commits_and_arrivals_only() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        let dir_a = temp_dir();
+        let dir_b = temp_dir();
+        let a = Store::open(&dir_a).unwrap();
+        let b = Store::open(&dir_b).unwrap();
+
+        let commits = std::sync::Arc::new(AtomicUsize::new(0));
+        {
+            let c = commits.clone();
+            a.set_commit_hook(move || {
+                c.fetch_add(1, Ordering::SeqCst);
+            });
+        }
+        let arrivals = std::sync::Arc::new(Mutex::new(Vec::<String>::new()));
+        {
+            let ar = arrivals.clone();
+            b.set_arrivals_hook(move |ids| ar.lock().unwrap().extend(ids.to_vec()));
+        }
+
+        let note = a.create_note(rect()).unwrap();
+        a.set_text(&note.id, "hello from A".into()).unwrap();
+        assert!(commits.load(Ordering::SeqCst) >= 2, "each local commit wakes sync");
+
+        // First sync introduces the note on B — exactly one arrival.
+        sync_a_to_b(&a, &b);
+        assert_eq!(arrivals.lock().unwrap().as_slice(), &[note.id.clone()]);
+
+        // A later edit syncs a known note — no new arrival.
+        a.set_text(&note.id, "edited on A".into()).unwrap();
+        sync_a_to_b(&a, &b);
+        assert_eq!(arrivals.lock().unwrap().len(), 1, "edits are not arrivals");
+
+        // Remote applies never fire B's commit hook path (no ping-pong): B's
+        // own commit count is untracked here, but A pulling B's (empty) delta
+        // must not re-report the note either.
+        sync_a_to_b(&b, &a);
+        assert_eq!(arrivals.lock().unwrap().len(), 1);
+        std::fs::remove_dir_all(dir_a).ok();
+        std::fs::remove_dir_all(dir_b).ok();
     }
 
     /// CONTENT must converge across replicas. Presentation (pinned, tucked,

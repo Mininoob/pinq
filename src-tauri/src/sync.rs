@@ -45,7 +45,10 @@ const SYNC_TICK: Duration = Duration::from_secs(1);
 /// Full sync at least this often even with no local changes (pulls remote-only edits).
 const SYNC_REFRESH_MS: u64 = 60_000;
 /// Back off failing peers.
-const SYNC_RETRY_MS: u64 = 15_000;
+// Short: a transiently failed session (peer restarting, dropped socket)
+// shouldn't make edits feel stuck; truly-offline peers cost one bounded
+// connect attempt per window.
+const SYNC_RETRY_MS: u64 = 5_000;
 /// Presence: how often the open-note set is re-broadcast unchanged, and how
 /// long a peer's set is believed without a refresh (crash/offline expiry).
 const PRESENCE_RESEND_MS: u64 = 10_000;
@@ -1602,6 +1605,17 @@ pub fn note_is_live(state: State<'_, SyncState>, id: String) -> bool {
         .any(|(set, at)| now.saturating_sub(*at) <= PRESENCE_TTL_MS && set.contains(&id))
 }
 
+/// Nudge the sync loop to run now instead of at the next tick. Wired to the
+/// store's commit hook, so every local content commit (new note, edit, tag,
+/// drop, trash) starts propagating immediately.
+pub fn wake(app: &AppHandle) {
+    let Some(state) = app.try_state::<SyncState>() else { return };
+    let tx = state.sync_wake.lock().unwrap().clone();
+    if let Some(tx) = tx {
+        let _ = tx.send(());
+    }
+}
+
 /// A content op just committed for `note_id`. If any live peer has that note
 /// open, target it for an immediate session and wake the sync loop — the
 /// session itself is still the ordinary vv-delta exchange.
@@ -2107,6 +2121,10 @@ fn send_blobs(chan: &mut SecureChan, blobs: &Path, hashes: &[String]) -> Result<
 /// doesn't land under the requested hash).
 fn recv_blobs(chan: &mut SecureChan, blobs: &Path) -> Result<usize, String> {
     let mut pending: HashMap<String, crate::blobs::IncomingBlob> = HashMap::new();
+    // Blobs that went bad mid-stream (oversized, disk error): keep draining
+    // their frames so ONE bad blob never aborts the whole session — a failed
+    // session used to put the peer on retry cooldown and stall all sync.
+    let mut skipped: std::collections::HashSet<String> = Default::default();
     let mut stored = 0usize;
     let result = (|| loop {
         let frame = chan.recv().map_err(ioerr)?;
@@ -2114,17 +2132,39 @@ fn recv_blobs(chan: &mut SecureChan, blobs: &Path) -> Result<usize, String> {
             Some("blob") => {
                 let hash = frame.get("hash").and_then(|h| h.as_str()).unwrap_or_default().to_string();
                 let data = b64f(&frame, "data").map_err(ioerr)?;
-                let incoming = match pending.entry(hash.clone()) {
-                    std::collections::hash_map::Entry::Occupied(e) => e.into_mut(),
-                    std::collections::hash_map::Entry::Vacant(e) => e.insert(
-                        crate::blobs::IncomingBlob::new(blobs).map_err(|e| e.to_string())?,
-                    ),
-                };
-                if incoming.size + data.len() as u64 > crate::attachments::MAX_FILE_BYTES + BLOB_CHUNK as u64 {
-                    return Err("blob too large".to_string());
+                let last = frame.get("last").and_then(|l| l.as_bool()).unwrap_or(false);
+                if !skipped.contains(&hash) {
+                    let incoming = match pending.entry(hash.clone()) {
+                        std::collections::hash_map::Entry::Occupied(e) => Some(e.into_mut()),
+                        std::collections::hash_map::Entry::Vacant(e) => {
+                            match crate::blobs::IncomingBlob::new(blobs) {
+                                Ok(b) => Some(e.insert(b)),
+                                Err(e) => {
+                                    eprintln!("pinq: can't receive blob: {e}");
+                                    skipped.insert(hash.clone());
+                                    None
+                                }
+                            }
+                        }
+                    };
+                    if let Some(incoming) = incoming {
+                        let too_big = incoming.size + data.len() as u64
+                            > crate::attachments::MAX_FILE_BYTES + BLOB_CHUNK as u64;
+                        let failed = !too_big && incoming.write(&data).is_err();
+                        if too_big || failed {
+                            eprintln!(
+                                "pinq: skipping blob from peer ({})",
+                                if too_big { "too large" } else { "write failed" }
+                            );
+                            if let Some(b) = pending.remove(&hash) {
+                                b.discard();
+                            }
+                            skipped.insert(hash.clone());
+                        }
+                    }
                 }
-                incoming.write(&data).map_err(|e| e.to_string())?;
-                if frame.get("last").and_then(|l| l.as_bool()).unwrap_or(false) {
+                if last {
+                    skipped.remove(&hash);
                     if let Some(incoming) = pending.remove(&hash) {
                         match incoming.finish() {
                             Ok(actual) if actual == hash => stored += 1,

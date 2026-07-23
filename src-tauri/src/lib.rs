@@ -169,6 +169,23 @@ pub fn run() {
             let data_dir = app.path().app_data_dir()?;
             let store = Arc::new(store::Store::open(&data_dir)?);
             app.manage(store.clone());
+            // Local commits start syncing immediately; remote arrivals get a
+            // quiet heads-up (they land library-only by design, so without
+            // this a synced-in note is invisible until the library is opened).
+            {
+                let handle = app.handle().clone();
+                store.set_commit_hook(move || sync::wake(&handle));
+                let handle = app.handle().clone();
+                store.set_arrivals_hook(move |ids| {
+                    use tauri_plugin_notification::NotificationExt;
+                    let body = if ids.len() == 1 {
+                        "A new note synced into your Library".to_string()
+                    } else {
+                        format!("{} new notes synced into your Library", ids.len())
+                    };
+                    let _ = handle.notification().builder().title("Pinq").body(body).show();
+                });
+            }
             app.manage(settings::SettingsStore::open(data_dir.join("settings.json")));
             {
                 let show_in = app.state::<settings::SettingsStore>().current().show_in;
