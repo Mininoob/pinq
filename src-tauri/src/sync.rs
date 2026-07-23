@@ -74,7 +74,13 @@ fn space_fp(space_key: &[u8; 32]) -> String {
 pub struct PeerInfo {
     pub device_name: String,
     pub device_short: String,
+    /// Best single candidate, for display and as a fallback.
     pub addr: String,
+    /// All ranked connect candidates ("ip:port"). A peer advertises every
+    /// interface it has (Wi-Fi, VPN tunnels, IPv6…); only some are reachable
+    /// from here, so connecting tries them in order.
+    #[serde(skip)]
+    pub addrs: Vec<String>,
     #[serde(skip)]
     pub tag: String,
     pub same_space: bool, // recomputed at read time
@@ -83,6 +89,58 @@ pub struct PeerInfo {
     pub last_sync: Option<SyncStatus>,
     /// "ip:port#id" if this peer hosts a relay (from its mDNS advertisement).
     pub relay_addr: Option<String>,
+}
+
+/// Rank a peer's advertised IPs into connect candidates: private IPv4 first
+/// (the LAN address that almost always works), then public IPv4, then global
+/// IPv6. Loopback and link-local are dropped — loopback is never the peer,
+/// and link-local needs scope ids we don't have. Picking ONE arbitrary
+/// address here (the old behavior) broke pairing whenever mDNS resolved a
+/// VPN/virtual interface first.
+fn rank_addrs(ips: impl IntoIterator<Item = std::net::IpAddr>, port: u16) -> Vec<String> {
+    let mut ranked: Vec<(u8, String)> = ips
+        .into_iter()
+        .filter_map(|ip| match ip {
+            std::net::IpAddr::V4(v4) => {
+                if v4.is_loopback() || v4.is_link_local() || v4.is_unspecified() {
+                    return None;
+                }
+                Some((if v4.is_private() { 0 } else { 1 }, format!("{v4}:{port}")))
+            }
+            std::net::IpAddr::V6(v6) => {
+                if v6.is_loopback() || v6.is_unspecified() || (v6.segments()[0] & 0xffc0) == 0xfe80 {
+                    return None;
+                }
+                Some((2, format!("[{v6}]:{port}")))
+            }
+        })
+        .collect();
+    ranked.sort();
+    ranked.dedup();
+    ranked.into_iter().map(|(_, a)| a).collect()
+}
+
+/// Try each candidate in order; the first that accepts wins. Returns the
+/// stream plus the address that worked (so follow-up connections reuse it).
+fn connect_peer(addrs: &[String]) -> Result<(TcpStream, String), String> {
+    let mut last = "peer has no reachable address".to_string();
+    for addr in addrs {
+        let Ok(sock) = addr.parse::<std::net::SocketAddr>() else { continue };
+        match TcpStream::connect_timeout(&sock, Duration::from_secs(4)) {
+            Ok(s) => return Ok((s, addr.clone())),
+            Err(e) => last = format!("connect {addr}: {e}"),
+        }
+    }
+    Err(last)
+}
+
+/// A peer's connect candidates, with the display addr as a last resort.
+fn peer_candidates(p: &PeerInfo) -> Vec<String> {
+    if p.addrs.is_empty() {
+        vec![p.addr.clone()]
+    } else {
+        p.addrs.clone()
+    }
 }
 
 /// What happened the last time we synced with a peer.
@@ -344,9 +402,18 @@ pub fn pair_request(
         started_ms: pinq_core::now_ms(),
     });
     let name = state.device_name.clone();
+    // Try every address this peer advertises, not just the display one.
+    let candidates = {
+        let peers = state.peers.lock().unwrap();
+        peers
+            .values()
+            .find(|p| p.addr == addr || p.addrs.contains(&addr))
+            .map(peer_candidates)
+            .unwrap_or_else(|| vec![addr.clone()])
+    };
     std::thread::spawn(move || {
         let result = (|| -> Result<(), String> {
-            let mut stream = TcpStream::connect(&addr).map_err(|e| format!("connect: {e}"))?;
+            let (mut stream, good_addr) = connect_peer(&candidates)?;
             stream.set_write_timeout(Some(Duration::from_secs(20))).ok();
             // The other user gets 60s to answer; give the reply a little more.
             stream.set_read_timeout(Some(Duration::from_secs(75))).ok();
@@ -367,7 +434,7 @@ pub fn pair_request(
                     let s = app.state::<SyncState>();
                     s.set_pairing_status("connecting", None);
                     drop(stream); // the SPAKE2 join opens its own connection
-                    run_joiner(&app, &addr, &code)
+                    run_joiner(&app, &good_addr, &code)
                 }
                 Some("pair_decline") => Err("the other device declined".into()),
                 _ => Err("unexpected reply".into()),
@@ -528,10 +595,8 @@ pub async fn rotate_space(app: AppHandle) -> Result<String, String> {
             .collect();
         let mut delivered = 0usize;
         for peer in &peers {
-            let Ok(sock) = peer.addr.parse() else { continue };
-            let ok = TcpStream::connect_timeout(&sock, Duration::from_secs(5))
-                .map_err(|e| e.to_string())
-                .and_then(|s| {
+            let ok = connect_peer(&peer_candidates(peer))
+                .and_then(|(s, _)| {
                     sync_as_initiator(&store, &blobs, &old_key, &secret, &device_name, Some(&msg), s)
                 })
                 .is_ok();
@@ -893,21 +958,24 @@ fn run_discovery(app: AppHandle) {
                     .get_property_val_str("name")
                     .unwrap_or("unknown device")
                     .to_string();
-                let ip = info.get_addresses().iter().next().cloned();
-                let addr = ip
-                    .map(|a| format!("{a}:{}", info.get_port()))
-                    .unwrap_or_default();
+                let addrs = rank_addrs(
+                    info.get_addresses().iter().map(|a| a.to_ip_addr()),
+                    info.get_port(),
+                );
+                let addr = addrs.first().cloned().unwrap_or_default();
                 // A peer hosting a relay advertises it; the id doubles as the
                 // pin, so adopted relays are identity-verified from the start.
                 let relay_addr = match (
                     info.get_property_val_str("relayPort"),
                     info.get_property_val_str("relayId"),
                 ) {
-                    (Some(port), Some(id)) if !port.is_empty() && !id.is_empty() => info
-                        .get_addresses()
-                        .iter()
-                        .next()
-                        .map(|a| format!("{a}:{port}#{id}")),
+                    (Some(port), Some(id)) if !port.is_empty() && !id.is_empty() => addrs
+                        .first()
+                        .and_then(|a| a.parse::<std::net::SocketAddr>().ok())
+                        .map(|s| match s.ip() {
+                            std::net::IpAddr::V6(v6) => format!("[{v6}]:{port}#{id}"),
+                            v4 => format!("{v4}:{port}#{id}"),
+                        }),
                     _ => None,
                 };
                 state.peers.lock().unwrap().insert(
@@ -916,6 +984,7 @@ fn run_discovery(app: AppHandle) {
                         device_name: name,
                         device_short: dev,
                         addr,
+                        addrs,
                         tag: peer_tag,
                         same_space: false,
                         last_seen_ms: pinq_core::now_ms(),
@@ -1144,7 +1213,7 @@ fn run_joiner(app: &AppHandle, addr: &str, code: &str) -> Result<(), String> {
     let b64 = base64::engine::general_purpose::STANDARD;
 
     let state = app.state::<SyncState>();
-    let mut stream = TcpStream::connect(addr).map_err(|e| format!("connect: {e}"))?;
+    let (mut stream, _) = connect_peer(&[addr.to_string()])?;
     stream.set_read_timeout(Some(Duration::from_secs(150))).ok();
     stream.set_write_timeout(Some(Duration::from_secs(20))).ok();
 
@@ -2044,18 +2113,7 @@ fn run_sync_loop(app: AppHandle) {
             }
             let space_key = *state.space_key.lock().unwrap();
             let secret = *state.device_secret.lock().unwrap();
-            let result = TcpStream::connect_timeout(
-                &match peer.addr.parse() {
-                    Ok(a) => a,
-                    Err(_) => {
-                        state.syncing.lock().unwrap().remove(&peer.device_short);
-                        continue;
-                    }
-                },
-                Duration::from_secs(5),
-            )
-            .map_err(|e| format!("connect: {e}"))
-            .and_then(|stream| {
+            let result = connect_peer(&peer_candidates(&peer)).and_then(|(stream, _)| {
                 sync_as_initiator(
                     &store,
                     &blobs,
@@ -2606,6 +2664,31 @@ mod tests {
     use super::*;
     use pinq_core::Rect;
 
+    #[test]
+    fn rank_addrs_prefers_private_v4_and_drops_unusable() {
+        let ips: Vec<std::net::IpAddr> = vec![
+            "fe80::1".parse().unwrap(),      // link-local v6 — dropped
+            "2001:db8::7".parse().unwrap(),  // global v6 — last resort
+            "127.0.0.1".parse().unwrap(),    // loopback — dropped
+            "169.254.9.9".parse().unwrap(),  // link-local v4 — dropped
+            "8.8.4.4".parse().unwrap(),      // public v4 — second
+            "192.168.1.20".parse().unwrap(), // private v4 — first
+        ];
+        let ranked = rank_addrs(ips, 47814);
+        assert_eq!(
+            ranked,
+            vec![
+                "192.168.1.20:47814".to_string(),
+                "8.8.4.4:47814".to_string(),
+                "[2001:db8::7]:47814".to_string(),
+            ]
+        );
+        // Every candidate must parse as a connectable socket address.
+        for a in &ranked {
+            a.parse::<std::net::SocketAddr>().expect("parseable");
+        }
+    }
+
     fn temp(tag: &str) -> std::path::PathBuf {
         let dir = std::env::temp_dir().join(format!("pinq-sync-{tag}-{}", pinq_core::new_note_id()));
         std::fs::create_dir_all(dir.join("blobs")).unwrap();
@@ -3035,6 +3118,7 @@ mod tests {
             device_name: dev.into(),
             device_short: dev.into(),
             addr: "10.0.0.9:47814".into(),
+            addrs: vec!["10.0.0.9:47814".into()],
             tag: "tag1".into(),
             same_space: false,
             last_seen_ms: 0,
