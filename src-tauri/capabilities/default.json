@@ -3,5 +3,5 @@
   "identifier": "default",
   "description": "All Pinq windows (pad, notes, preview) may use core APIs and app commands",
   "windows": ["*"],
-  "permissions": ["core:default"]
+  "permissions": ["core:default", "core:window:allow-start-dragging"]
 }

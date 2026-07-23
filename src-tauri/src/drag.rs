@@ -247,6 +247,8 @@ pub async fn library_pull_start(
         Some(win) => {
             let _ = win.set_position(PhysicalPosition::new(rect.x, rect.y));
             let _ = win.show();
+            // Pulled out = untucked: back to living on one Space (macOS).
+            crate::notes::tuck_follows_spaces(&win, false);
         }
         None => {
             let mut note = note;
@@ -402,6 +404,10 @@ pub fn finish_drag(app: &AppHandle) -> Result<(), String> {
                 std::thread::sleep(Duration::from_millis(10));
             }
             let _ = store.tuck_note(&id, edge.name(), target);
+            // Tucked slivers follow the user across macOS Spaces.
+            if let Some(w) = app2.get_webview_window(&label) {
+                crate::notes::tuck_follows_spaces(&w, true);
+            }
             let _ = app2.emit_to(&label, "pinq-tucked", edge.name());
         });
         return Ok(());

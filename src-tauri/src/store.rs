@@ -20,9 +20,24 @@ fn db_err(e: rusqlite::Error) -> io::Error {
     io::Error::other(e)
 }
 
+/// THIS device's layout for one note. Presentation is deliberately not
+/// content: it never becomes ops and never syncs — pinning, tucking, and
+/// window position are each device's own business. Content replay still
+/// mutates the base NoteState's pinned/tucked/rect (legacy ops from older
+/// devices), but this overlay wins at read time.
+#[derive(Clone, Debug)]
+pub struct Presentation {
+    pub pinned: bool,
+    pub tucked: Option<String>,
+    pub rect: Rect,
+}
+
 pub struct Store {
     db: Mutex<Connection>,
     notes: Mutex<HashMap<NoteId, NoteState>>,
+    /// Device-local presentation overlay; notes absent here read as
+    /// unpinned/untucked (a note that synced in but was never pulled out).
+    presentation: Mutex<HashMap<NoteId, Presentation>>,
     /// Latest unflushed rect per note; drained by the flusher thread once per second
     /// so a window drag doesn't write hundreds of actions.
     pending_place: Mutex<HashMap<NoteId, Rect>>,
@@ -93,6 +108,12 @@ CREATE TABLE IF NOT EXISTS notes (
     items       TEXT NOT NULL DEFAULT '[]',
     created_ms  INTEGER NOT NULL,
     modified_ms INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS presentation (
+    note_id TEXT PRIMARY KEY,
+    pinned  INTEGER NOT NULL DEFAULT 0,
+    tucked  TEXT,
+    x INTEGER, y INTEGER, w INTEGER, h INTEGER
 );
 ";
 
@@ -340,12 +361,126 @@ impl Store {
         maybe_backup(&conn, data_dir);
 
         let notes = load_projection(&conn)?;
+
+        // Presentation overlay: seed once from the op-derived state so a
+        // device upgrading to per-device layout keeps the layout it had.
+        let seeded: bool = conn
+            .query_row("SELECT COUNT(*) FROM meta WHERE key='presentation-seeded'", [], |r| {
+                r.get::<_, i64>(0).map(|n| n > 0)
+            })
+            .map_err(db_err)?;
+        if !seeded {
+            let tx = conn.transaction().map_err(db_err)?;
+            for n in notes.values() {
+                tx.execute(
+                    "INSERT OR REPLACE INTO presentation (note_id, pinned, tucked, x, y, w, h)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+                    rusqlite::params![
+                        n.id,
+                        n.pinned as i64,
+                        n.tucked,
+                        n.rect.x,
+                        n.rect.y,
+                        n.rect.w,
+                        n.rect.h
+                    ],
+                )
+                .map_err(db_err)?;
+            }
+            tx.execute("INSERT INTO meta (key, value) VALUES ('presentation-seeded', '1')", [])
+                .map_err(db_err)?;
+            tx.commit().map_err(db_err)?;
+        }
+        let presentation = {
+            let mut map = HashMap::new();
+            let mut stmt = conn
+                .prepare("SELECT note_id, pinned, tucked, x, y, w, h FROM presentation")
+                .map_err(db_err)?;
+            let rows = stmt
+                .query_map([], |r| {
+                    Ok((
+                        r.get::<_, String>(0)?,
+                        Presentation {
+                            pinned: r.get::<_, i64>(1)? != 0,
+                            tucked: r.get(2)?,
+                            rect: Rect {
+                                x: r.get::<_, Option<i64>>(3)?.unwrap_or(0) as i32,
+                                y: r.get::<_, Option<i64>>(4)?.unwrap_or(0) as i32,
+                                w: r.get::<_, Option<i64>>(5)?.unwrap_or(280) as u32,
+                                h: r.get::<_, Option<i64>>(6)?.unwrap_or(220) as u32,
+                            },
+                        },
+                    ))
+                })
+                .map_err(db_err)?;
+            for row in rows {
+                let (id, p) = row.map_err(db_err)?;
+                map.insert(id, p);
+            }
+            drop(stmt);
+            map
+        };
+
         Ok(Self {
             db: Mutex::new(conn),
             notes: Mutex::new(notes),
+            presentation: Mutex::new(presentation),
             pending_place: Mutex::new(HashMap::new()),
             device_id,
         })
+    }
+
+    /// Overlay this device's layout onto an op-derived note. No overlay entry
+    /// = the note lives in the library here (unpinned, untucked); its
+    /// op-derived rect is kept as a starting point for when it's pulled out.
+    /// Trashed notes always read unpinned.
+    fn overlaid(&self, mut n: NoteState) -> NoteState {
+        let pres = self.presentation.lock().unwrap();
+        match pres.get(&n.id) {
+            Some(p) => {
+                n.pinned = p.pinned && !n.trashed;
+                n.tucked = if n.trashed { None } else { p.tucked.clone() };
+                n.rect = p.rect;
+            }
+            None => {
+                n.pinned = false;
+                n.tucked = None;
+            }
+        }
+        n
+    }
+
+    /// Persist one overlay row (in-mem map is the source of truth in between).
+    fn save_presentation(&self, id: &str) {
+        let entry = self.presentation.lock().unwrap().get(id).cloned();
+        let Some(p) = entry else { return };
+        let conn = self.db.lock().unwrap();
+        let _ = conn.execute(
+            "INSERT OR REPLACE INTO presentation (note_id, pinned, tucked, x, y, w, h)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+            rusqlite::params![id, p.pinned as i64, p.tucked, p.rect.x, p.rect.y, p.rect.w, p.rect.h],
+        );
+    }
+
+    /// Update (or create) this note's overlay entry and persist it.
+    fn set_presentation(&self, id: &str, f: impl FnOnce(&mut Presentation)) {
+        let base_rect = self
+            .notes
+            .lock()
+            .unwrap()
+            .get(id)
+            .map(|n| n.rect)
+            .unwrap_or(Rect { x: 120, y: 120, w: 280, h: 220 });
+        {
+            let mut pres = self.presentation.lock().unwrap();
+            let entry = pres.entry(id.to_string()).or_insert(Presentation {
+                pinned: false,
+                tucked: None,
+                rect: base_rect,
+            });
+            f(entry);
+        }
+        self.save_presentation(id);
     }
 
     /// Replication actor id (used by tests today; the device registry in the
@@ -528,15 +663,18 @@ impl Store {
     }
 
     pub fn get(&self, id: &str) -> Option<NoteState> {
-        self.notes.lock().unwrap().get(id).cloned()
+        let n = self.notes.lock().unwrap().get(id).cloned();
+        n.map(|n| self.overlaid(n))
     }
 
     pub fn pinned_notes(&self) -> Vec<NoteState> {
-        self.notes.lock().unwrap().values().filter(|n| n.pinned).cloned().collect()
+        let base: Vec<NoteState> = self.notes.lock().unwrap().values().cloned().collect();
+        base.into_iter().map(|n| self.overlaid(n)).filter(|n| n.pinned).collect()
     }
 
     pub fn all_notes(&self) -> Vec<NoteState> {
-        let mut v: Vec<NoteState> = self.notes.lock().unwrap().values().cloned().collect();
+        let base: Vec<NoteState> = self.notes.lock().unwrap().values().cloned().collect();
+        let mut v: Vec<NoteState> = base.into_iter().map(|n| self.overlaid(n)).collect();
         v.sort_by(|a, b| b.modified_ms.cmp(&a.modified_ms));
         v
     }
@@ -561,8 +699,11 @@ impl Store {
                 .map_err(db_err)?;
             rows.collect::<Result<_, _>>().map_err(db_err)?
         };
-        let notes = self.notes.lock().unwrap();
-        Ok(ids.iter().filter_map(|id| notes.get(id).cloned()).collect())
+        let hits: Vec<NoteState> = {
+            let notes = self.notes.lock().unwrap();
+            ids.iter().filter_map(|id| notes.get(id).cloned()).collect()
+        };
+        Ok(hits.into_iter().map(|n| self.overlaid(n)).collect())
     }
 
     /// Every text version of a note, newest first — straight from the op-log.
@@ -588,6 +729,13 @@ impl Store {
         let id = pinq_core::new_note_id();
         let at_ms = now_ms();
         self.commit(Action::NoteCreated { id: id.clone(), at_ms, rect })?;
+        // The creating device pins its own new note; other devices receive it
+        // as library content only (no overlay entry until they pull it out).
+        self.set_presentation(&id, |p| {
+            p.pinned = true;
+            p.tucked = None;
+            p.rect = rect;
+        });
         Ok(self.get(&id).expect("created note present"))
     }
 
@@ -788,99 +936,123 @@ impl Store {
         Ok(true)
     }
 
+    // ----- presentation mutators: device-local, never ops, never sync -----
+
     pub fn queue_place(&self, id: &str, rect: Rect) {
-        let mut notes = self.notes.lock().unwrap();
-        if let Some(n) = notes.get_mut(id) {
+        {
+            let mut pres = self.presentation.lock().unwrap();
+            // No overlay entry = not on this device's desktop; a stray move
+            // event for it changes nothing.
+            let Some(p) = pres.get_mut(id) else { return };
             // A tucked note's window slides for hover-peeks; its logical rect
-            // only changes through tuck/untuck ops, never incidental moves.
-            if n.tucked.is_some() {
+            // only changes through tuck/untuck, never incidental moves.
+            if p.tucked.is_some() {
                 return;
             }
-            n.rect = rect;
-            self.pending_place.lock().unwrap().insert(id.to_string(), rect);
+            p.rect = rect;
         }
+        self.pending_place.lock().unwrap().insert(id.to_string(), rect);
     }
 
+    /// Persist rects the in-memory overlay already has (dirty ids only) —
+    /// a window drag stays one DB write per second, not one per move event.
     pub fn flush_places(&self) {
         let drained: Vec<(NoteId, Rect)> = self.pending_place.lock().unwrap().drain().collect();
-        for (id, rect) in drained {
-            let _ = self.commit(Action::NotePlaced { id, at_ms: now_ms(), rect });
+        for (id, _) in drained {
+            self.save_presentation(&id);
         }
-    }
-
-    fn flush_place_of(&self, id: &str) -> io::Result<()> {
-        if let Some(rect) = self.pending_place.lock().unwrap().remove(id) {
-            self.commit(Action::NotePlaced { id: id.to_string(), at_ms: now_ms(), rect })?;
-        }
-        Ok(())
     }
 
     /// Re-pin a previously filed note at its last known rect (undo of a throw/file).
     /// Trashed notes must be restored first.
     pub fn repin(&self, id: &str) -> io::Result<Option<NoteState>> {
-        {
-            let notes = self.notes.lock().unwrap();
-            match notes.get(id) {
-                None => return Ok(None),
-                Some(n) if n.trashed => return Ok(None),
-                Some(n) if n.pinned => return Ok(Some(n.clone())),
-                Some(_) => {}
-            }
+        match self.get(id) {
+            None => return Ok(None),
+            Some(n) if n.trashed => return Ok(None),
+            Some(n) if n.pinned => return Ok(Some(n)),
+            Some(_) => {}
         }
-        let rect = self.get(id).map(|n| n.rect).unwrap_or_default();
-        self.commit(Action::NoteRepinned { id: id.to_string(), at_ms: now_ms(), rect })?;
+        self.set_presentation(id, |p| {
+            p.pinned = true;
+            p.tucked = None;
+        });
         Ok(self.get(id))
     }
 
     /// Park a pinned note as a sliver at a screen edge (throw-to-stick). The
     /// tuck rect supersedes any pending drag placement.
     pub fn tuck_note(&self, id: &str, edge: &str, rect: Rect) -> io::Result<()> {
-        {
-            let notes = self.notes.lock().unwrap();
-            match notes.get(id) {
-                Some(n) if n.pinned && !n.trashed => {}
-                _ => return Ok(()),
-            }
+        match self.get(id) {
+            Some(n) if n.pinned && !n.trashed => {}
+            _ => return Ok(()),
         }
         self.pending_place.lock().unwrap().remove(id);
-        self.commit(Action::NoteTucked {
-            id: id.to_string(),
-            at_ms: now_ms(),
-            edge: edge.to_string(),
-            rect,
-        })
+        self.set_presentation(id, |p| {
+            p.tucked = Some(edge.to_string());
+            p.rect = rect;
+        });
+        Ok(())
     }
 
     /// Pull a tucked note back out to a normal on-screen rect.
     pub fn untuck_note(&self, id: &str, rect: Rect) -> io::Result<()> {
-        {
-            let notes = self.notes.lock().unwrap();
-            match notes.get(id) {
-                Some(n) if n.tucked.is_some() => {}
-                _ => return Ok(()),
-            }
+        match self.get(id) {
+            Some(n) if n.tucked.is_some() => {}
+            _ => return Ok(()),
         }
         self.pending_place.lock().unwrap().remove(id);
-        self.commit(Action::NoteUntucked { id: id.to_string(), at_ms: now_ms(), rect })
+        self.set_presentation(id, |p| {
+            p.tucked = None;
+            p.rect = rect;
+        });
+        Ok(())
     }
 
-    /// Unpin (throw/file/close). Idempotent: filing an unpinned note is a no-op,
-    /// so a programmatic close after filing doesn't double-log.
+    /// Unpin (throw/file/close). Idempotent, and local to this device.
     pub fn file_note(&self, id: &str) -> io::Result<()> {
-        self.flush_place_of(id)?;
-        {
-            let notes = self.notes.lock().unwrap();
-            match notes.get(id) {
-                Some(n) if n.pinned => {}
-                _ => return Ok(()),
-            }
+        match self.get(id) {
+            Some(n) if n.pinned => {}
+            _ => return Ok(()),
         }
-        self.commit(Action::NoteFiled { id: id.to_string(), at_ms: now_ms() })
+        self.pending_place.lock().unwrap().remove(id);
+        self.set_presentation(id, |p| {
+            p.pinned = false;
+            p.tucked = None;
+        });
+        Ok(())
     }
 
-    /// Move to trash: unpinned, hidden from normal lists, fully recoverable.
+    /// Local overlay cleanup after REMOTE lifecycle ops: a note trashed
+    /// elsewhere unpins here (its window closes); a purged note drops its row.
+    pub fn reconcile_presentation(&self, id: &str) {
+        let base = self.notes.lock().unwrap().get(id).cloned();
+        match base {
+            None => {
+                self.presentation.lock().unwrap().remove(id);
+                let conn = self.db.lock().unwrap();
+                let _ = conn.execute("DELETE FROM presentation WHERE note_id=?1", [id]);
+            }
+            Some(n) if n.trashed => {
+                let showing = {
+                    let pres = self.presentation.lock().unwrap();
+                    pres.get(id).map(|p| p.pinned || p.tucked.is_some()).unwrap_or(false)
+                };
+                if showing {
+                    self.set_presentation(id, |p| {
+                        p.pinned = false;
+                        p.tucked = None;
+                    });
+                }
+            }
+            _ => {}
+        }
+    }
+
+    // ----- content lifecycle: synced ops (with local presentation ripple) -----
+
+    /// Move to trash: synced (deleting is data, not layout); the local window
+    /// state clears too.
     pub fn trash_note(&self, id: &str) -> io::Result<()> {
-        self.flush_place_of(id)?;
         {
             let notes = self.notes.lock().unwrap();
             match notes.get(id) {
@@ -888,7 +1060,13 @@ impl Store {
                 _ => return Ok(()),
             }
         }
-        self.commit(Action::NoteTrashed { id: id.to_string(), at_ms: now_ms() })
+        self.pending_place.lock().unwrap().remove(id);
+        self.commit(Action::NoteTrashed { id: id.to_string(), at_ms: now_ms() })?;
+        self.set_presentation(id, |p| {
+            p.pinned = false;
+            p.tucked = None;
+        });
+        Ok(())
     }
 
     /// Restore from trash (stays unpinned; pin separately if wanted).
@@ -909,7 +1087,11 @@ impl Store {
             return Ok(());
         }
         self.pending_place.lock().unwrap().remove(id);
-        self.commit(Action::NoteDeleted { id: id.to_string(), at_ms: now_ms() })
+        self.commit(Action::NoteDeleted { id: id.to_string(), at_ms: now_ms() })?;
+        self.presentation.lock().unwrap().remove(id);
+        let conn = self.db.lock().unwrap();
+        let _ = conn.execute("DELETE FROM presentation WHERE note_id=?1", [id]);
+        Ok(())
     }
 
     /// Permanently delete everything in the trash. Returns how many were purged.
@@ -1461,16 +1643,70 @@ mod tests {
         b.apply_remote_ops(&ops).unwrap()
     }
 
+    /// CONTENT must converge across replicas. Presentation (pinned, tucked,
+    /// rect) is per-device by design, so it's normalized out before comparing.
     fn assert_same_state(a: &Store, b: &Store) {
-        let mut na = a.all_notes();
-        let mut nb = b.all_notes();
-        na.sort_by(|x, y| x.id.cmp(&y.id));
-        nb.sort_by(|x, y| x.id.cmp(&y.id));
+        let strip = |mut notes: Vec<pinq_core::NoteState>| {
+            notes.sort_by(|x, y| x.id.cmp(&y.id));
+            for n in &mut notes {
+                n.pinned = false;
+                n.tucked = None;
+                n.rect = Rect { x: 0, y: 0, w: 0, h: 0 };
+            }
+            notes
+        };
         assert_eq!(
-            serde_json::to_string(&na).unwrap(),
-            serde_json::to_string(&nb).unwrap(),
+            serde_json::to_string(&strip(a.all_notes())).unwrap(),
+            serde_json::to_string(&strip(b.all_notes())).unwrap(),
             "replicas diverged"
         );
+    }
+
+    #[test]
+    fn presentation_is_device_local() {
+        let (da, db_) = (temp_dir(), temp_dir());
+        let a = Store::open(&da).unwrap();
+        let b = Store::open(&db_).unwrap();
+
+        // A creates a note: pinned for A, but B receives it as library content.
+        let note = a.create_note(rect()).unwrap();
+        assert!(a.get(&note.id).unwrap().pinned);
+        sync_a_to_b(&a, &b);
+        let on_b = b.get(&note.id).unwrap();
+        assert!(!on_b.pinned, "remote create must land unpinned");
+        assert!(on_b.tucked.is_none());
+
+        // Presentation moves create NO ops: the version vector stays put.
+        let vv_before = a.version_vector().unwrap();
+        a.tuck_note(&note.id, "right", Rect { x: 1900, y: 300, w: 280, h: 220 }).unwrap();
+        a.file_note(&note.id).unwrap();
+        a.repin(&note.id).unwrap();
+        a.queue_place(&note.id, Rect { x: 5, y: 5, w: 280, h: 220 });
+        a.flush_places();
+        assert_eq!(a.version_vector().unwrap(), vv_before, "presentation leaked into the op-log");
+
+        // B pins its copy; A's layout is untouched by B's choice.
+        b.repin(&note.id).unwrap();
+        assert!(b.get(&note.id).unwrap().pinned);
+        assert_eq!(a.get(&note.id).unwrap().rect.x, 5);
+
+        // Trash IS content: A trashes, B (after sync) unpins + trashes.
+        a.trash_note(&note.id).unwrap();
+        for id in sync_a_to_b(&a, &b) {
+            b.reconcile_presentation(&id);
+        }
+        let on_b = b.get(&note.id).unwrap();
+        assert!(on_b.trashed && !on_b.pinned);
+
+        // Overlay survives reopen: A restores + repins, then reopens.
+        a.restore_note(&note.id).unwrap();
+        a.repin(&note.id).unwrap();
+        drop(a);
+        let a = Store::open(&da).unwrap();
+        assert!(a.get(&note.id).unwrap().pinned, "overlay must persist");
+
+        std::fs::remove_dir_all(da).ok();
+        std::fs::remove_dir_all(db_).ok();
     }
 
     #[test]

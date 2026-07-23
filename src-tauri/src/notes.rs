@@ -97,7 +97,19 @@ pub fn open_note_window(app: &AppHandle, note: &NoteState) -> tauri::Result<()> 
     // the home they already had.
     #[cfg(windows)]
     crate::desktops::assign_home(app, &note.id, false);
+    tuck_follows_spaces(&win, note.tucked.is_some());
     Ok(())
+}
+
+/// macOS Spaces behavior: a TUCKED note follows the user everywhere (its
+/// sliver joins all Spaces, like the pad), while an untucked note belongs to
+/// the Space it lives on. Windows has its own per-virtual-desktop system
+/// (desktops.rs) — no-op there.
+pub fn tuck_follows_spaces(win: &tauri::WebviewWindow, tucked: bool) {
+    #[cfg(target_os = "macos")]
+    let _ = win.set_visible_on_all_workspaces(tucked);
+    #[cfg(not(target_os = "macos"))]
+    let _ = (win, tucked);
 }
 
 fn rect_center(r: &pinq_core::Rect) -> (i32, i32) {
@@ -191,47 +203,29 @@ pub fn sync_parked(app: &AppHandle) {
     }
 }
 
-/// Make windows match state after a sync applied remote ops: a note pinned on
-/// another machine appears here; one filed/trashed/deleted there vanishes here.
-/// Existing windows are left in place (content refreshes via the sync event) —
-/// remote position changes don't yank a note out from under the user.
-/// Called from sync threads only — never the main thread (window creation).
+/// After a sync applied remote ops: presentation is per-device now, so remote
+/// changes never open windows or move notes here — a note created elsewhere
+/// lands in the library only. The one lifecycle ripple: a note trashed or
+/// purged remotely closes its local window (deleting is data, not layout).
+/// Content in open windows refreshes via the pinq-sync-applied event.
+/// Called from sync threads only — never the main thread (window teardown).
 pub fn reconcile_after_sync(app: &AppHandle, affected: &[String]) {
     let Some(store) = app.try_state::<Arc<Store>>() else { return };
     let parked = app.state::<ParkedState>();
     let mut changed = false;
 
     for id in affected {
-        let label = window_label(id);
-        let win = app.get_webview_window(&label);
-        match store.get(id) {
-            Some(n) if n.pinned && !n.trashed => {
-                if win.is_none() && !parked.0.lock().unwrap().contains(id) {
-                    let (ax, ay) = anchor_point(&n);
-                    match crate::monitors::work_area_containing(app, ax, ay) {
-                        Some(wa) => {
-                            let mut n = n;
-                            if n.tucked.is_none() {
-                                n.rect = clamp_to_area(n.rect, wa);
-                            }
-                            let _ = open_note_window(app, &n);
-                            changed = true;
-                        }
-                        None => {
-                            parked.0.lock().unwrap().insert(id.clone());
-                        }
-                    }
-                }
-            }
-            // Unpinned, trashed, or deleted remotely: the window goes away.
-            // (Destroy, not close — CloseRequested's file_note is a no-op on
-            // an already-unpinned note, but skip the round trip.)
-            _ => {
-                parked.0.lock().unwrap().remove(id);
-                if let Some(w) = win {
-                    let _ = w.destroy();
-                    changed = true;
-                }
+        // Unpin/clean the local overlay for remotely trashed/purged notes.
+        store.reconcile_presentation(id);
+        let gone = match store.get(id) {
+            None => true,
+            Some(n) => n.trashed,
+        };
+        if gone {
+            parked.0.lock().unwrap().remove(id);
+            if let Some(w) = app.get_webview_window(&window_label(id)) {
+                let _ = w.destroy();
+                changed = true;
             }
         }
     }
@@ -518,6 +512,8 @@ pub fn untuck_and_focus(app: &AppHandle, store: &Store, id: &str) -> Result<(), 
     }
     r = clamp_to_area(r, wa);
     store.untuck_note(id, r).map_err(|e| e.to_string())?;
+    // Untucked: the note belongs to this Space again (macOS).
+    tuck_follows_spaces(&win, false);
 
     // Slide out, then hand focus back to the note.
     let start = win.outer_position().map(|p| (p.x, p.y)).unwrap_or((r.x, r.y));

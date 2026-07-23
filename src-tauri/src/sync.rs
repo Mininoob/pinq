@@ -39,7 +39,9 @@ const BLOB_CHUNK: usize = 128 * 1024;
 /// Target serialized size per ops frame.
 const OPS_BATCH_BYTES: usize = 96 * 1024;
 /// How often the loop looks for something to do.
-const SYNC_TICK: Duration = Duration::from_secs(5);
+// 1s: the per-tick cost is one MAX(ctr) query + a hash, and content edits
+// should feel live on the other device (~1-2s with the 400ms edit debounce).
+const SYNC_TICK: Duration = Duration::from_secs(1);
 /// Full sync at least this often even with no local changes (pulls remote-only edits).
 const SYNC_REFRESH_MS: u64 = 60_000;
 /// Back off failing peers.
