@@ -57,7 +57,7 @@ const TOAST_W: f64 = 300.0;
 const TOAST_H: f64 = 48.0;
 
 pub fn create_toast_window(app: &AppHandle) -> tauri::Result<()> {
-    let win = tauri::WebviewWindowBuilder::new(
+    let builder = tauri::WebviewWindowBuilder::new(
         app,
         TOAST_LABEL,
         tauri::WebviewUrl::App("index.html?role=toast".into()),
@@ -70,8 +70,11 @@ pub fn create_toast_window(app: &AppHandle) -> tauri::Result<()> {
     .resizable(false)
     .focused(false)
     .shadow(false)
-    .visible(false)
-    .build()?;
+    .visible(false);
+    // Undo toasts should surface on whatever Space the user is on (macOS).
+    #[cfg(target_os = "macos")]
+    let builder = builder.visible_on_all_workspaces(true);
+    let win = builder.build()?;
     let _ = win;
     Ok(())
 }
@@ -133,12 +136,20 @@ pub fn start_drag(app: &AppHandle, drag: &DragState, id: &str) -> Result<(), Str
 /// (e.g. the freshly opened note window stole focus), its pointerup never
 /// arrives and nothing would ever stop the follow loop.
 #[cfg(windows)]
-fn mouse_buttons_up() -> bool {
+pub(crate) fn mouse_buttons_up() -> bool {
     use windows::Win32::UI::Input::KeyboardAndMouse::{GetAsyncKeyState, VK_LBUTTON, VK_RBUTTON};
     unsafe {
         (GetAsyncKeyState(VK_LBUTTON.0 as i32) as u16 & 0x8000) == 0
             && (GetAsyncKeyState(VK_RBUTTON.0 as i32) as u16 & 0x8000) == 0
     }
+}
+
+#[cfg(target_os = "macos")]
+pub(crate) fn mouse_buttons_up() -> bool {
+    use objc2_core_graphics::{CGEventSource, CGEventSourceStateID, CGMouseButton};
+    let state = CGEventSourceStateID::CombinedSessionState;
+    !CGEventSource::button_state(state, CGMouseButton::Left)
+        && !CGEventSource::button_state(state, CGMouseButton::Right)
 }
 
 /// The drag session itself: registers the ActiveDrag and spawns the follow
@@ -158,7 +169,7 @@ fn start_drag_at(app: &AppHandle, drag: &DragState, id: &str, grab: (f64, f64), 
 
     let app2 = app.clone();
     std::thread::spawn(move || {
-        #[cfg(windows)]
+        #[cfg(any(windows, target_os = "macos"))]
         let mut released_at: Option<Instant> = None;
         while !stop.load(Ordering::Relaxed) {
             if let Ok(c) = app2.cursor_position() {
@@ -180,7 +191,7 @@ fn start_drag_at(app: &AppHandle, drag: &DragState, id: &str, grab: (f64, f64), 
             // Safety net: physical button released but no end command came
             // (lost capture). Give the normal path a grace window, then
             // finish the drag ourselves — whoever takes the session wins.
-            #[cfg(windows)]
+            #[cfg(any(windows, target_os = "macos"))]
             if mouse_buttons_up() {
                 match released_at {
                     None => released_at = Some(Instant::now()),

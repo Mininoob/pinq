@@ -12,7 +12,7 @@ const FIND_H: f64 = 420.0;
 
 /// Pre-created hidden at startup so Ctrl+Alt+F opens instantly.
 pub fn create_find_window(app: &AppHandle) -> tauri::Result<()> {
-    let win = WebviewWindowBuilder::new(
+    let builder = WebviewWindowBuilder::new(
         app,
         FIND_LABEL,
         WebviewUrl::App("index.html?role=find".into()),
@@ -24,8 +24,11 @@ pub fn create_find_window(app: &AppHandle) -> tauri::Result<()> {
     .skip_taskbar(true)
     .resizable(false)
     .shadow(false)
-    .visible(false)
-    .build()?;
+    .visible(false);
+    // Quick-find is summoned by a global shortcut from any Space (macOS).
+    #[cfg(target_os = "macos")]
+    let builder = builder.visible_on_all_workspaces(true);
+    let win = builder.build()?;
     let _ = win;
     Ok(())
 }

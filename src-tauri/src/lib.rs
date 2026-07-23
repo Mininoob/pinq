@@ -163,7 +163,18 @@ pub fn run() {
             let store = Arc::new(store::Store::open(&data_dir)?);
             app.manage(store.clone());
             app.manage(settings::SettingsStore::open(data_dir.join("settings.json")));
-            tray::init(app.handle())?;
+            {
+                let show_in = app.state::<settings::SettingsStore>().current().show_in;
+                #[cfg(target_os = "macos")]
+                if show_in == "menubar" {
+                    app.set_activation_policy(tauri::ActivationPolicy::Accessory);
+                }
+                // "dock" hides the tray on macOS only; everywhere else the tray
+                // is the app's only always-available entry point.
+                if !(cfg!(target_os = "macos") && show_in == "dock") {
+                    tray::init(app.handle())?;
+                }
+            }
 
             // Placement flusher: coalesced move/resize actions hit the log at most
             // once per second per note (crash loses ≤1s of placement, never content).
@@ -249,11 +260,21 @@ pub fn run() {
         })
         .build(tauri::generate_context!())
         .expect("error while building Pinq")
-        .run(|app_handle, event| {
-            if let tauri::RunEvent::Exit = event {
+        .run(|app_handle, event| match event {
+            tauri::RunEvent::Exit => {
                 if let Some(store) = app_handle.try_state::<Arc<store::Store>>() {
                     store.flush_places();
                 }
             }
+            // macOS Dock icon click with no visible windows: open the library.
+            // Off the main thread — window creation on the event loop deadlocks.
+            #[cfg(target_os = "macos")]
+            tauri::RunEvent::Reopen { .. } => {
+                let app = app_handle.clone();
+                std::thread::spawn(move || {
+                    let _ = panels::create_or_focus_library(&app);
+                });
+            }
+            _ => {}
         });
 }

@@ -48,6 +48,10 @@ pub fn work_area_at(app: &AppHandle, x: i32, y: i32) -> Rect {
     if let Some(r) = windows_work_area_at(x, y) {
         return r;
     }
+    #[cfg(not(windows))]
+    if let Some(r) = work_area_containing(app, x, y) {
+        return r;
+    }
     primary_work_area(app)
 }
 

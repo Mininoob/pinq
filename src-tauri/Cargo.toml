@@ -12,7 +12,7 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
-tauri = { version = "2", features = ["tray-icon"] }
+tauri = { version = "2", features = ["tray-icon", "macos-private-api"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 pinq-core = { path = "../crates/pinq-core" }
@@ -22,7 +22,7 @@ blake3 = "1.8.5"
 base64 = "0.22.1"
 zip = "8.6.0"
 ed25519-dalek = "3.0.0"
-keyring = { version = "4.1.5", features = ["windows-native-keyring-store"] }
+keyring = "4.1.5"
 mdns-sd = "0.20.1"
 getrandom = "0.4.3"
 spake2 = "0.4.0"
@@ -31,6 +31,9 @@ pinq-relay = { path = "../crates/pinq-relay" }
 fastembed = "5.17.3"
 tauri-plugin-notification = "2.3.3"
 tauri-plugin-autostart = "2.5.1"
+
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2-core-graphics = { version = "0.3.2", features = ["CGEventSource", "CGEventTypes"] }
 
 [target.'cfg(windows)'.dependencies]
 windows = { version = "0.62", features = [

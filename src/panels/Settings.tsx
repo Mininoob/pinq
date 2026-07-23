@@ -99,6 +99,15 @@ const MONITOR_SCOPES = [
   { id: "all", label: "All monitors" },
 ] as const;
 
+const SHOW_IN = [
+  { id: "both", label: "Menu bar & Dock" },
+  { id: "menubar", label: "Menu bar" },
+  { id: "dock", label: "Dock" },
+] as const;
+
+/** The show-in choice only exists on macOS; Windows always keeps the tray. */
+const IS_MAC = navigator.userAgent.includes("Mac");
+
 export default function Settings() {
   const [settings, setSettings] = createSignal<PinqSettings>({
     theme: "amber",
@@ -113,6 +122,7 @@ export default function Settings() {
     relayHost: false,
     smartSuggestions: false,
     launchAtLogin: false,
+    showIn: "both",
   });
 
   const [sync, setSync] = createSignal<SyncInfo | null>(null);
@@ -381,7 +391,7 @@ export default function Settings() {
         </div>
 
         <h2>System</h2>
-        <p class="settings-hint">Start Pinq automatically when you sign in to Windows.</p>
+        <p class="settings-hint">Start Pinq automatically when you sign in.</p>
         <div class="seg">
           <button
             class="seg-btn"
@@ -395,9 +405,27 @@ export default function Settings() {
             classList={{ active: settings().launchAtLogin }}
             onClick={() => void update({ launchAtLogin: true })}
           >
-            Start with Windows
+            Start at login
           </button>
         </div>
+        <Show when={IS_MAC}>
+          <p class="settings-hint" style={{ "margin-top": "12px" }}>
+            Where Pinq shows: the menu bar icon, the Dock icon, or both.
+          </p>
+          <div class="seg">
+            <For each={[...SHOW_IN]}>
+              {(s) => (
+                <button
+                  class="seg-btn"
+                  classList={{ active: settings().showIn === s.id }}
+                  onClick={() => void update({ showIn: s.id })}
+                >
+                  {s.label}
+                </button>
+              )}
+            </For>
+          </div>
+        </Show>
 
         <h2>Smart suggestions</h2>
         <p class="settings-hint">

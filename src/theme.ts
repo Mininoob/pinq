@@ -25,6 +25,8 @@ export interface PinqSettings {
   relayHost: boolean;
   smartSuggestions: boolean;
   launchAtLogin: boolean;
+  /** Where Pinq surfaces on macOS; ignored on Windows. */
+  showIn: "both" | "menubar" | "dock";
 }
 
 const DEFAULTS: PinqSettings = {
@@ -40,6 +42,7 @@ const DEFAULTS: PinqSettings = {
   relayHost: false,
   smartSuggestions: false,
   launchAtLogin: false,
+  showIn: "both",
 };
 
 /** Latest settings this window has seen (kept fresh by the settings event). */

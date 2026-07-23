@@ -121,7 +121,7 @@ fn create_pad_on(
 ) -> tauri::Result<()> {
     let (w, h, x, y) = pad_geometry(monitor, edge, position);
 
-    let win = WebviewWindowBuilder::new(
+    let builder = WebviewWindowBuilder::new(
         app,
         label,
         WebviewUrl::App(format!("index.html?role=pad&edge={edge}").into()),
@@ -135,8 +135,11 @@ fn create_pad_on(
     .maximizable(false)
     .minimizable(false)
     .shadow(false)
-    .visible(false)
-    .build()?;
+    .visible(false);
+    // The pad must follow the user across Spaces and over full-screen apps.
+    #[cfg(target_os = "macos")]
+    let builder = builder.visible_on_all_workspaces(true);
+    let win = builder.build()?;
 
     win.set_size(PhysicalSize::new(w, h))?;
     win.set_position(PhysicalPosition::new(x, y))?;

@@ -28,6 +28,9 @@ fn default_pad_position() -> f64 {
 fn default_pad_monitors() -> String {
     "primary".into()
 }
+fn default_show_in() -> String {
+    "both".into()
+}
 
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -69,9 +72,13 @@ pub struct Settings {
     /// (~25 MB) into app data; nothing about notes ever leaves the machine.
     #[serde(default)]
     pub smart_suggestions: bool,
-    /// Start Pinq when Windows starts.
+    /// Start Pinq when the user signs in (Windows registry / macOS LaunchAgent).
     #[serde(default)]
     pub launch_at_login: bool,
+    /// Where Pinq surfaces on macOS: "both" | "menubar" | "dock". Ignored on
+    /// Windows — the tray icon is the only handle to the app there.
+    #[serde(default = "default_show_in")]
+    pub show_in: String,
 }
 
 impl Default for Settings {
@@ -89,6 +96,7 @@ impl Default for Settings {
             relay_host: false,
             smart_suggestions: false,
             launch_at_login: false,
+            show_in: default_show_in(),
         }
     }
 }
@@ -129,7 +137,7 @@ pub fn get_settings(store: State<'_, SettingsStore>) -> Settings {
 /// on the event-loop thread deadlocks, see pull_end).
 #[tauri::command]
 pub fn set_settings(app: AppHandle, store: State<'_, SettingsStore>, settings: Settings) {
-    let (pad_changed, relay_changed, smart_changed, launch_changed) = {
+    let (pad_changed, relay_changed, smart_changed, launch_changed, presence_changed) = {
         let mut s = store.inner.lock().unwrap();
         let pad = s.pad_edge != settings.pad_edge
             || s.pad_position != settings.pad_position
@@ -137,12 +145,14 @@ pub fn set_settings(app: AppHandle, store: State<'_, SettingsStore>, settings: S
         let relay = s.relay_host != settings.relay_host;
         let smart = s.smart_suggestions != settings.smart_suggestions;
         let launch = s.launch_at_login != settings.launch_at_login;
+        let presence = s.show_in != settings.show_in;
         *s = settings.clone();
         store.save(&s);
-        (pad, relay, smart, launch)
+        (pad, relay, smart, launch, presence)
     };
     let smart_on = settings.smart_suggestions;
     let launch_on = settings.launch_at_login;
+    let show_in = settings.show_in.clone();
     let _ = app.emit("pinq-settings", settings);
     if relay_changed {
         let app = app.clone();
@@ -155,6 +165,9 @@ pub fn set_settings(app: AppHandle, store: State<'_, SettingsStore>, settings: S
         use tauri_plugin_autostart::ManagerExt;
         let al = app.autolaunch();
         let _ = if launch_on { al.enable() } else { al.disable() };
+    }
+    if presence_changed {
+        crate::tray::apply_presence(&app, &show_in);
     }
     if pad_changed {
         std::thread::spawn(move || {

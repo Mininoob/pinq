@@ -50,7 +50,7 @@ impl PullState {
 /// Created hidden at startup and reused for every pull, so the gesture never waits
 /// on webview construction.
 pub fn create_preview_window(app: &AppHandle) -> tauri::Result<()> {
-    let win = WebviewWindowBuilder::new(
+    let builder = WebviewWindowBuilder::new(
         app,
         PREVIEW_LABEL,
         WebviewUrl::App("index.html?role=preview".into()),
@@ -63,8 +63,11 @@ pub fn create_preview_window(app: &AppHandle) -> tauri::Result<()> {
     .resizable(false)
     .focused(false)
     .shadow(false)
-    .visible(false)
-    .build()?;
+    .visible(false);
+    // Pads live on every Space (macOS); the preview they spawn must too.
+    #[cfg(target_os = "macos")]
+    let builder = builder.visible_on_all_workspaces(true);
+    let win = builder.build()?;
     win.set_ignore_cursor_events(true)?;
     Ok(())
 }
@@ -130,10 +133,30 @@ pub fn pull_start(
 
     let app2 = app.clone();
     std::thread::spawn(move || {
+        #[cfg(any(windows, target_os = "macos"))]
+        let mut released_at: Option<std::time::Instant> = None;
         while !stop.load(Ordering::Relaxed) {
             if let (Ok(c), Some(p)) = (app2.cursor_position(), app2.get_webview_window(PREVIEW_LABEL)) {
                 let r = rect_for_cursor(c.x, c.y, w, h, scale);
                 let _ = p.set_position(PhysicalPosition::new(r.x, r.y));
+            }
+            // Safety net (same rule as the note drag loop): button released but
+            // no pull_end arrived — lost capture. Cancel and hide the preview.
+            #[cfg(any(windows, target_os = "macos"))]
+            if crate::drag::mouse_buttons_up() {
+                match released_at {
+                    None => released_at = Some(std::time::Instant::now()),
+                    Some(t) if t.elapsed() > Duration::from_millis(250) => {
+                        app2.state::<PullState>().stop_current();
+                        if let Some(p) = app2.get_webview_window(PREVIEW_LABEL) {
+                            let _ = p.hide();
+                        }
+                        break;
+                    }
+                    Some(_) => {}
+                }
+            } else {
+                released_at = None;
             }
             std::thread::sleep(Duration::from_millis(8));
         }
