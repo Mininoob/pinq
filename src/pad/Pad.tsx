@@ -18,10 +18,47 @@ const HOLD_SLOP_PX = 4;
 // The menu forgives brief mouse exits before sliding back in.
 const MENU_LEAVE_GRACE_MS = 650;
 
-// Views on the pulled-out pad; future views are one entry here.
+// Views on the pulled-out pad; future views are one entry here. Icons are
+// factories so every open mints fresh nodes.
 const MENU_ENTRIES = [
-  { label: "Library", action: "open_library" },
-  { label: "Settings", action: "open_settings" },
+  {
+    label: "Library",
+    action: "open_library",
+    icon: () => (
+      <svg
+        width="14"
+        height="14"
+        viewBox="0 0 14 14"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="1.4"
+        stroke-linecap="round"
+        stroke-linejoin="round"
+      >
+        <rect x="2" y="2" width="10" height="10" rx="2" />
+        <path d="M5 5.2h4M5 7.6h4M5 10h2.5" />
+      </svg>
+    ),
+  },
+  {
+    label: "Settings",
+    action: "open_settings",
+    icon: () => (
+      <svg
+        width="14"
+        height="14"
+        viewBox="0 0 14 14"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="1.4"
+        stroke-linecap="round"
+      >
+        <path d="M2 4.2h10M2 9.8h10" />
+        <circle cx="5.2" cy="4.2" r="1.7" fill="var(--note-bg)" />
+        <circle cx="8.8" cy="9.8" r="1.7" fill="var(--note-bg)" />
+      </svg>
+    ),
+  },
 ];
 
 // Travel into the screen ("away") and along the edge, per docked edge.
@@ -50,8 +87,6 @@ export default function Pad(props: { edge: PadEdge }) {
   // Accessibility mode: a quick, still click creates a note.
   let clickCandidate = false;
   let downAt = 0;
-
-  const vertical = () => props.edge === "left" || props.edge === "right";
 
   const openMenu = () => {
     clickCandidate = false;
@@ -175,25 +210,22 @@ export default function Pad(props: { edge: PadEdge }) {
         class={`pad edge-${props.edge}`}
         classList={{ [phase()]: true, revealed: revealed(), "menu-open": menuOpen() }}
       >
-        <Show
-          when={menuOpen()}
-          fallback={
-            <div class="pad-grip">
-              <span /><span /><span />
-            </div>
-          }
-        >
-          <div class="pad-menu" classList={{ vertical: vertical() }}>
-            <For each={MENU_ENTRIES}>
-              {(entry) => (
-                <button class="pad-menu-btn" onClick={() => void pick(entry.action)}>
-                  {entry.label}
-                </button>
-              )}
-            </For>
-          </div>
-        </Show>
+        <div class="pad-grip">
+          <span /><span /><span />
+        </div>
       </div>
+      <Show when={menuOpen()}>
+        <div class="pad-card">
+          <For each={MENU_ENTRIES}>
+            {(entry) => (
+              <button class="pad-card-btn" onClick={() => void pick(entry.action)}>
+                {entry.icon()}
+                <span>{entry.label}</span>
+              </button>
+            )}
+          </For>
+        </div>
+      </Show>
     </div>
   );
 }

@@ -5,13 +5,16 @@
 //! notes AND pad). A window is visible only when no active layer hides it, so
 //! leaving fullscreen never reveals notes the user had hidden themselves.
 //!
-//! Fullscreen detection (spec §11, Windows): SHQueryUserNotificationState catches
-//! D3D-exclusive fullscreen and presentation mode; a foreground-window geometry
-//! heuristic catches borderless-fullscreen (window covers its whole monitor and
-//! has no caption). The desktop itself (Progman/WorkerW) is caption-less and
-//! monitor-covering, so it is explicitly excluded. Detection is polled at 500ms —
-//! documented limitation: borderless games are indistinguishable from borderless
-//! maximized apps; a per-app setting refines this later.
+//! Fullscreen detection (spec §11, Windows): a foreground-window geometry
+//! heuristic catches fullscreen apps in front (window covers its whole monitor
+//! and has no caption) — this is per-window, so a fullscreen video on one
+//! monitor doesn't hide the pad on another. SHQueryUserNotificationState is
+//! consulted only for presentation mode (explicit user intent); its global
+//! busy/D3D flags are ignored for the same multi-monitor reason. The desktop
+//! itself (Progman/WorkerW) is caption-less and monitor-covering, so it is
+//! explicitly excluded. Detection is polled at 500ms — documented limitation:
+//! borderless games are indistinguishable from borderless maximized apps; a
+//! per-app setting refines this later.
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
@@ -92,21 +95,20 @@ fn fullscreen_active() -> bool {
     use windows::Win32::Graphics::Gdi::{
         GetMonitorInfoW, MonitorFromWindow, MONITORINFO, MONITOR_DEFAULTTONEAREST,
     };
-    use windows::Win32::UI::Shell::{
-        SHQueryUserNotificationState, QUNS_BUSY, QUNS_PRESENTATION_MODE,
-        QUNS_RUNNING_D3D_FULL_SCREEN,
-    };
+    use windows::Win32::UI::Shell::{SHQueryUserNotificationState, QUNS_PRESENTATION_MODE};
     use windows::Win32::UI::WindowsAndMessaging::{
         GetClassNameW, GetForegroundWindow, GetWindowLongW, GetWindowRect,
         GetWindowThreadProcessId, GWL_STYLE, WS_CAPTION,
     };
 
     unsafe {
+        // Presentation mode is explicit user intent. QUNS_BUSY and
+        // QUNS_RUNNING_D3D_FULL_SCREEN are deliberately NOT honored: they are
+        // system-GLOBAL, so a fullscreen video on a second monitor would hide
+        // the pad on the primary one. The foreground-geometry heuristic below
+        // covers the case that matters (a fullscreen app actually in front).
         if let Ok(state) = SHQueryUserNotificationState() {
-            if state == QUNS_BUSY
-                || state == QUNS_RUNNING_D3D_FULL_SCREEN
-                || state == QUNS_PRESENTATION_MODE
-            {
+            if state == QUNS_PRESENTATION_MODE {
                 return true;
             }
         }

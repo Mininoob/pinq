@@ -14,8 +14,9 @@ const PAD_THICKNESS: f64 = 32.0;
 const PAD_LENGTH: f64 = 240.0;
 /// Keep clear of screen corners (snap zones, hot corners) — spec §9.
 const END_MARGIN: f64 = 48.0;
-/// Extra thickness while the press-and-hold menu is out (a slim label strip).
-const MENU_EXTRA: f64 = 26.0;
+/// Extra thickness while the press-and-hold menu is out: transparent window
+/// room for the floating menu card beside the sliver.
+const MENU_EXTRA: f64 = 150.0;
 
 /// Label of the pad currently expanded for its menu, if any. The watchdog
 /// leaves pad geometry alone while set — an expanded pad is off-spec on purpose.
