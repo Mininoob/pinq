@@ -26,6 +26,15 @@ use tauri::{Manager, WindowEvent};
 
 pub fn run() {
     tauri::Builder::default()
+        // Two instances sharing one database is silent chaos: each has its
+        // own in-memory store, only one wins the sync listener, and the
+        // other's windows never see remote changes. A second launch (e.g.
+        // autostart already running) just pings the first and exits.
+        .plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
+            // Second launch: make sure the running instance is visible.
+            crate::visibility::apply(app);
+            eprintln!("pinq: second launch deferred to the running instance");
+        }))
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_autostart::init(
             tauri_plugin_autostart::MacosLauncher::LaunchAgent,

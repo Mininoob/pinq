@@ -1068,19 +1068,36 @@ fn run_discovery(app: AppHandle) {
 /// family answers "connection refused" to peers dialing the other. Bind both;
 /// one family failing is fine (e.g. Linux dual-stack sockets collide, and the
 /// v4 bind already covers both there).
+/// Binding can fail transiently (port briefly held by a dying instance,
+/// network stack settling after wake) — keep retrying instead of giving up
+/// for the app's whole lifetime, and clear the surfaced error on recovery.
 fn run_listener(app: AppHandle) {
-    let v4 = TcpListener::bind(("0.0.0.0", SYNC_PORT));
-    let v6 = TcpListener::bind(("::", SYNC_PORT));
-    if let (Err(e), Err(_)) = (&v4, &v6) {
-        if let Some(s) = app.try_state::<SyncState>() {
-            *s.discovery_error.lock().unwrap() = Some(format!("sync listener failed: {e}"));
+    std::thread::spawn(move || loop {
+        let v4 = TcpListener::bind(("0.0.0.0", SYNC_PORT));
+        let v6 = TcpListener::bind(("::", SYNC_PORT));
+        if let (Err(e), Err(_)) = (&v4, &v6) {
+            if let Some(s) = app.try_state::<SyncState>() {
+                *s.discovery_error.lock().unwrap() =
+                    Some(format!("sync listener failed (retrying): {e}"));
+            }
+            std::thread::sleep(Duration::from_secs(5));
+            continue;
         }
-        return;
-    }
-    for listener in [v4, v6].into_iter().flatten() {
-        let app = app.clone();
-        std::thread::spawn(move || accept_loop(app, listener));
-    }
+        if let Some(s) = app.try_state::<SyncState>() {
+            *s.discovery_error.lock().unwrap() = None;
+        }
+        let mut threads = Vec::new();
+        for listener in [v4, v6].into_iter().flatten() {
+            let app = app.clone();
+            threads.push(std::thread::spawn(move || accept_loop(app, listener)));
+        }
+        // accept_loop only returns if the socket dies (adapter change, error
+        // storm) — when both are gone, loop around and re-bind.
+        for t in threads {
+            let _ = t.join();
+        }
+        std::thread::sleep(Duration::from_secs(1));
+    });
 }
 
 fn accept_loop(app: AppHandle, listener: TcpListener) {

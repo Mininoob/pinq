@@ -31,6 +31,7 @@ pinq-relay = { path = "../crates/pinq-relay" }
 fastembed = "5.17.3"
 tauri-plugin-notification = "2.3.3"
 tauri-plugin-autostart = "2.5.1"
+tauri-plugin-single-instance = "2"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2-core-graphics = { version = "0.3.2", features = ["CGEventSource", "CGEventTypes"] }

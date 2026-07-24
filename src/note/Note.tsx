@@ -1297,12 +1297,6 @@ export default function Note(props: { id: string }) {
         <div class="note-grip">
           <span /><span /><span />
         </div>
-        <Show when={live()}>
-          <span
-            class="note-live-dot"
-            title="This note is open on another device — syncing live"
-          />
-        </Show>
         <button
           class="note-remind-btn"
           classList={{ armed: remind() !== null }}
