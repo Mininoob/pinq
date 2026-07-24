@@ -994,10 +994,26 @@ impl Store {
 
     /// Persist rects the in-memory overlay already has (dirty ids only) —
     /// a window drag stays one DB write per second, not one per move event.
+    ///
+    /// Position is device-local, but a note's SIZE shapes how its text lays
+    /// out, so size changes also commit a synced NotePlaced op: a note pulled
+    /// out on another device then spawns at the size it was last worked on,
+    /// with its text wrapped exactly as it looked there. Pure moves emit
+    /// nothing (no sync traffic, no library reordering from drags).
     pub fn flush_places(&self) {
         let drained: Vec<(NoteId, Rect)> = self.pending_place.lock().unwrap().drain().collect();
-        for (id, _) in drained {
+        for (id, rect) in drained {
             self.save_presentation(&id);
+            let base = self.notes.lock().unwrap().get(&id).map(|n| n.rect);
+            if let Some(base) = base {
+                if base.w != rect.w || base.h != rect.h {
+                    let _ = self.commit(Action::NotePlaced {
+                        id: id.clone(),
+                        at_ms: now_ms(),
+                        rect,
+                    });
+                }
+            }
         }
     }
 
@@ -1785,6 +1801,35 @@ mod tests {
         drop(a);
         let a = Store::open(&da).unwrap();
         assert!(a.get(&note.id).unwrap().pinned, "overlay must persist");
+
+        std::fs::remove_dir_all(da).ok();
+        std::fs::remove_dir_all(db_).ok();
+    }
+
+    /// Position is device-local, but SIZE shapes text layout, so it syncs:
+    /// a note pulled out elsewhere spawns at the size it was last worked on.
+    #[test]
+    fn note_size_syncs_as_content() {
+        let (da, db_) = (temp_dir(), temp_dir());
+        let a = Store::open(&da).unwrap();
+        let b = Store::open(&db_).unwrap();
+        let note = a.create_note(rect()).unwrap();
+        sync_a_to_b(&a, &b);
+
+        // Pure move: no op leaves the device.
+        let vv = a.version_vector().unwrap();
+        a.queue_place(&note.id, Rect { x: 900, y: 40, w: 280, h: 220 });
+        a.flush_places();
+        assert_eq!(a.version_vector().unwrap(), vv, "moves stay device-local");
+
+        // Resize: becomes content, and B's library copy learns the new size.
+        a.queue_place(&note.id, Rect { x: 900, y: 40, w: 560, h: 400 });
+        a.flush_places();
+        assert_ne!(a.version_vector().unwrap(), vv, "size change must sync");
+        sync_a_to_b(&a, &b);
+        let on_b = b.get(&note.id).unwrap();
+        assert_eq!((on_b.rect.w, on_b.rect.h), (560, 400));
+        assert!(!on_b.pinned, "size sync must not pin the remote copy");
 
         std::fs::remove_dir_all(da).ok();
         std::fs::remove_dir_all(db_).ok();
