@@ -278,6 +278,8 @@ mod tests {
             remind_ms: None,
             due_ms: None,
             status: None,
+            favorite: false,
+            archived: false,
             tags: Vec::new(),
             attachments: Vec::new(),
             items: Vec::new(),

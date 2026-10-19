@@ -107,6 +107,8 @@ CREATE TABLE IF NOT EXISTS notes (
     remind_ms   INTEGER,
     due_ms      INTEGER,
     status      TEXT,
+    favorite    INTEGER NOT NULL DEFAULT 0,
+    archived    INTEGER NOT NULL DEFAULT 0,
     color       TEXT,
     paper       TEXT,
     tags        TEXT NOT NULL DEFAULT '[]',
@@ -354,6 +356,12 @@ impl Store {
             let _ = conn.execute("ALTER TABLE notes ADD COLUMN status TEXT", []);
             conn.pragma_update(None, "user_version", 7).map_err(db_err)?;
         }
+        // v8: favorite + archive flags (fresh DBs have them via BASE_SCHEMA).
+        if ver < 8 {
+            let _ = conn.execute("ALTER TABLE notes ADD COLUMN favorite INTEGER NOT NULL DEFAULT 0", []);
+            let _ = conn.execute("ALTER TABLE notes ADD COLUMN archived INTEGER NOT NULL DEFAULT 0", []);
+            conn.pragma_update(None, "user_version", 8).map_err(db_err)?;
+        }
 
         // One-time import of the legacy JSONL log into a fresh op-log.
         let empty: bool = conn
@@ -452,8 +460,8 @@ impl Store {
         let pres = self.presentation.lock().unwrap();
         match pres.get(&n.id) {
             Some(p) => {
-                n.pinned = p.pinned && !n.trashed;
-                n.tucked = if n.trashed { None } else { p.tucked.clone() };
+                n.pinned = p.pinned && !n.trashed && !n.archived;
+                n.tucked = if n.trashed || n.archived { None } else { p.tucked.clone() };
                 n.rect = p.rect;
             }
             None => {
@@ -729,14 +737,19 @@ impl Store {
     pub fn search(&self, query: &str, limit: usize) -> io::Result<Vec<NoteState>> {
         let fts_query = build_fts_query(query);
         if fts_query.is_empty() {
-            return Ok(self.all_notes().into_iter().filter(|n| !n.trashed).take(limit).collect());
+            return Ok(self
+                .all_notes()
+                .into_iter()
+                .filter(|n| !n.trashed && !n.archived)
+                .take(limit)
+                .collect());
         }
         let ids: Vec<String> = {
             let conn = self.db.lock().unwrap();
             let mut stmt = conn
                 .prepare(
                     "SELECT n.id FROM notes n JOIN notes_fts f ON n.rowid = f.rowid
-                     WHERE notes_fts MATCH ?1 AND n.trashed = 0
+                     WHERE notes_fts MATCH ?1 AND n.trashed = 0 AND n.archived = 0
                      ORDER BY rank LIMIT ?2",
                 )
                 .map_err(db_err)?;
@@ -830,6 +843,39 @@ impl Store {
             }
         }
         self.commit(Action::StatusSet { id: id.to_string(), at_ms: now_ms(), status })
+    }
+
+    /// Star (true) or unstar (false) a note in the library. Idempotent.
+    pub fn set_favorite(&self, id: &str, fav: bool) -> io::Result<()> {
+        {
+            let notes = self.notes.lock().unwrap();
+            match notes.get(id) {
+                Some(n) if n.favorite != fav => {}
+                _ => return Ok(()),
+            }
+        }
+        self.commit(Action::FavoriteSet { id: id.to_string(), at_ms: now_ms(), fav })
+    }
+
+    /// Archive (true) or unarchive (false). Archiving is content (syncs) and
+    /// also puts the note away on THIS device (clears the local pin overlay);
+    /// remote devices do the same in reconcile_after_sync. Idempotent.
+    pub fn set_archived(&self, id: &str, archived: bool) -> io::Result<()> {
+        {
+            let notes = self.notes.lock().unwrap();
+            match notes.get(id) {
+                Some(n) if n.archived != archived => {}
+                _ => return Ok(()),
+            }
+        }
+        self.commit(Action::ArchiveSet { id: id.to_string(), at_ms: now_ms(), archived })?;
+        if archived {
+            self.set_presentation(id, |p| {
+                p.pinned = false;
+                p.tucked = None;
+            });
+        }
+        Ok(())
     }
 
     pub fn set_color(&self, id: &str, color: Option<String>) -> io::Result<()> {
@@ -1118,7 +1164,7 @@ impl Store {
                 let conn = self.db.lock().unwrap();
                 let _ = conn.execute("DELETE FROM presentation WHERE note_id=?1", [id]);
             }
-            Some(n) if n.trashed => {
+            Some(n) if n.trashed || n.archived => {
                 let showing = {
                     let pres = self.presentation.lock().unwrap();
                     pres.get(id).map(|p| p.pinned || p.tucked.is_some()).unwrap_or(false)
@@ -1269,8 +1315,8 @@ fn write_note_row(
     match state {
         Some(n) => tx.execute(
             "INSERT OR REPLACE INTO notes
-             (id, x, y, w, h, text, pinned, trashed, tucked, remind_ms, color, paper, tags, attachments, items, created_ms, modified_ms, due_ms, status)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19)",
+             (id, x, y, w, h, text, pinned, trashed, tucked, remind_ms, color, paper, tags, attachments, items, created_ms, modified_ms, due_ms, status, favorite, archived)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21)",
             rusqlite::params![
                 n.id,
                 n.rect.x,
@@ -1290,7 +1336,9 @@ fn write_note_row(
                 n.created_ms as i64,
                 n.modified_ms as i64,
                 n.due_ms.map(|v| v as i64),
-                n.status
+                n.status,
+                n.favorite as i64,
+                n.archived as i64
             ],
         ),
         None => tx.execute("DELETE FROM notes WHERE id=?1", rusqlite::params![id]),
@@ -1327,7 +1375,9 @@ fn log_and_project(tx: &rusqlite::Transaction, device: &str, action: &Action) ->
         | Action::NoteDeleted { at_ms, .. }
         | Action::ReminderSet { at_ms, .. }
         | Action::DueSet { at_ms, .. }
-        | Action::StatusSet { at_ms, .. } => *at_ms as i64,
+        | Action::StatusSet { at_ms, .. }
+        | Action::FavoriteSet { at_ms, .. }
+        | Action::ArchiveSet { at_ms, .. } => *at_ms as i64,
     };
     let ctr: i64 = tx
         .query_row(
@@ -1408,6 +1458,14 @@ fn log_and_project(tx: &rusqlite::Transaction, device: &str, action: &Action) ->
         Action::StatusSet { id, at_ms, status } => tx.execute(
             "UPDATE notes SET status=?2, modified_ms=?3 WHERE id=?1",
             rusqlite::params![id, status, *at_ms as i64],
+        ),
+        Action::FavoriteSet { id, at_ms, fav } => tx.execute(
+            "UPDATE notes SET favorite=?2, modified_ms=?3 WHERE id=?1",
+            rusqlite::params![id, *fav as i64, *at_ms as i64],
+        ),
+        Action::ArchiveSet { id, at_ms, archived } => tx.execute(
+            "UPDATE notes SET archived=?2, modified_ms=?3 WHERE id=?1",
+            rusqlite::params![id, *archived as i64, *at_ms as i64],
         ),
         Action::NotePaperChanged { id, at_ms, paper } => tx.execute(
             "UPDATE notes SET paper=?2, modified_ms=?3 WHERE id=?1",
@@ -1509,7 +1567,7 @@ fn log_and_project(tx: &rusqlite::Transaction, device: &str, action: &Action) ->
 
 fn load_projection(conn: &Connection) -> io::Result<HashMap<NoteId, NoteState>> {
     let mut stmt = conn
-        .prepare("SELECT id, x, y, w, h, text, pinned, trashed, tucked, remind_ms, color, paper, tags, attachments, items, created_ms, modified_ms, due_ms, status FROM notes")
+        .prepare("SELECT id, x, y, w, h, text, pinned, trashed, tucked, remind_ms, color, paper, tags, attachments, items, created_ms, modified_ms, due_ms, status, favorite, archived FROM notes")
         .map_err(db_err)?;
     let rows = stmt
         .query_map([], |r| {
@@ -1530,6 +1588,8 @@ fn load_projection(conn: &Connection) -> io::Result<HashMap<NoteId, NoteState>> 
                 modified_ms: r.get::<_, i64>(16)? as u64,
                 due_ms: r.get::<_, Option<i64>>(17)?.map(|v| v as u64),
                 status: r.get(18)?,
+                favorite: r.get::<_, i64>(19)? != 0,
+                archived: r.get::<_, i64>(20)? != 0,
             })
         })
         .map_err(db_err)?;
@@ -1766,6 +1826,40 @@ mod tests {
         assert_eq!(n.status.as_deref(), Some("doing"));
         a.set_status(&id, None).unwrap();
         assert_eq!(a.get(&id).unwrap().status, None);
+        std::fs::remove_dir_all(da).ok();
+        std::fs::remove_dir_all(db_).ok();
+    }
+
+    /// Favorite and archive sync as content; archiving also puts the note
+    /// away locally (overlay pin cleared) and hides it from search.
+    #[test]
+    fn favorite_and_archive_sync_and_put_away() {
+        let (da, db_) = (temp_dir(), temp_dir());
+        let a = Store::open(&da).unwrap();
+        let b = Store::open(&db_).unwrap();
+        let note = a.create_note(rect()).unwrap();
+        a.set_text(&note.id, "quarterly budget numbers".into()).unwrap();
+        a.set_favorite(&note.id, true).unwrap();
+        sync_a_to_b(&a, &b);
+        assert!(b.get(&note.id).unwrap().favorite);
+
+        assert!(a.get(&note.id).unwrap().pinned, "creator starts pinned");
+        a.set_archived(&note.id, true).unwrap();
+        let on_a = a.get(&note.id).unwrap();
+        assert!(on_a.archived && !on_a.pinned, "archive puts the note away");
+        assert!(
+            a.search("budget", 10).unwrap().is_empty(),
+            "archived notes stay out of search"
+        );
+
+        for id in sync_a_to_b(&a, &b) {
+            b.reconcile_presentation(&id);
+        }
+        assert!(b.get(&note.id).unwrap().archived);
+
+        a.set_archived(&note.id, false).unwrap();
+        let back = a.get(&note.id).unwrap();
+        assert!(!back.archived && !back.pinned, "unarchive returns to library only");
         std::fs::remove_dir_all(da).ok();
         std::fs::remove_dir_all(db_).ok();
     }

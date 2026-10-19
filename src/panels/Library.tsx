@@ -23,6 +23,8 @@ interface NoteState {
   remind_ms: number | null;
   due_ms: number | null;
   status: string | null;
+  favorite: boolean;
+  archived: boolean;
   tags: string[];
   attachments: Array<{ hash: string; name: string; mime: string; size: number }>;
   created_ms: number;
@@ -33,6 +35,15 @@ const firstImage = (n: NoteState) => n.attachments.find((a) => a.mime.startsWith
 
 type SortBy = "modified" | "created" | "title" | "due";
 type GroupBy = "none" | "color" | "tag";
+// Sidebar views. Inbox = unprocessed captures: not on the desktop, untagged.
+type LibView = "all" | "inbox" | "favorites" | "desktop" | "archive";
+const LIB_VIEWS: Array<{ key: LibView; label: string; glyph: string }> = [
+  { key: "all", label: "All notes", glyph: "🗂" },
+  { key: "inbox", label: "Inbox", glyph: "📥" },
+  { key: "favorites", label: "Favorites", glyph: "★" },
+  { key: "desktop", label: "On desktop", glyph: "📌" },
+  { key: "archive", label: "Archive", glyph: "🗃" },
+];
 
 // Per-device view preferences; pure display state, so localStorage not settings.
 const viewPref = <T extends string>(key: string, fallback: T, valid: readonly T[]): T => {
@@ -83,6 +94,40 @@ export default function Library() {
     setView(v);
     localStorage.setItem("pinq.lib.view", v);
   };
+  const [libView, setLibView] = createSignal<LibView>(
+    viewPref("pinq.lib.sideview", "all", ["all", "inbox", "favorites", "desktop", "archive"]),
+  );
+  const pickLibView = (v: LibView) => {
+    setLibView(v);
+    localStorage.setItem("pinq.lib.sideview", v);
+    setSelected(new Set<string>());
+  };
+  // Multi-select: ctrl+click toggles, shift+click extends from the last pick.
+  const [selected, setSelected] = createSignal<Set<string>>(new Set<string>(), { equals: false });
+  let lastSel: string | null = null;
+  const [batchTag, setBatchTag] = createSignal("");
+  // Saved searches: per-device, like the other view preferences.
+  const [savedSearches, setSavedSearches] = createSignal<string[]>(
+    (() => {
+      try {
+        const v = JSON.parse(localStorage.getItem("pinq.lib.saved") ?? "[]");
+        return Array.isArray(v) ? v.filter((s) => typeof s === "string") : [];
+      } catch {
+        return [];
+      }
+    })(),
+  );
+  const persistSaved = (list: string[]) => {
+    setSavedSearches(list);
+    localStorage.setItem("pinq.lib.saved", JSON.stringify(list));
+  };
+  const saveSearch = () => {
+    const q = query().trim();
+    if (!q) return;
+    persistSaved([...new Set([...savedSearches(), q])]);
+    flashMessage(`Saved search: ${q}`);
+  };
+  const removeSearch = (q: string) => persistSaved(savedSearches().filter((s) => s !== q));
   let timer: number | undefined;
   let suggestTimer: number | undefined;
   let confirmTimer: number | undefined;
@@ -121,11 +166,20 @@ export default function Library() {
     messageTimer = window.setTimeout(() => setMessage(null), 5000);
   };
 
+  let refreshDebounce: number | undefined;
+  let unlistenChanged: UnlistenFn | undefined;
+
   onMount(async () => {
     void refresh();
     void refreshSuggestions();
-    timer = window.setInterval(() => void refresh(), 2000);
+    // Event-driven: every local commit broadcasts pinq-changed, syncs emit
+    // pinq-sync-applied. The slow interval is only a safety net.
+    timer = window.setInterval(() => void refresh(), 30000);
     suggestTimer = window.setInterval(() => void refreshSuggestions(), 60000);
+    unlistenChanged = await listen("pinq-changed", () => {
+      clearTimeout(refreshDebounce);
+      refreshDebounce = window.setTimeout(() => void refresh(), 250);
+    });
     // Fresh embeddings can surface new suggestions right away.
     unlistenSmart = await listen("pinq-smart-updated", () => void refreshSuggestions());
     // Notes that just arrived from another device show up immediately.
@@ -153,9 +207,11 @@ export default function Library() {
     clearInterval(suggestTimer);
     clearTimeout(confirmTimer);
     clearTimeout(messageTimer);
+    clearTimeout(refreshDebounce);
     unlistenDrop?.();
     unlistenSync?.();
     unlistenSmart?.();
+    unlistenChanged?.();
   });
 
   const exportAll = async () => {
@@ -168,31 +224,142 @@ export default function Library() {
     flashMessage(`Backup saved: ${path}`);
   };
 
+  // Search supports filter tokens alongside free text:
+  //   tag:x  is:fav|task|todo|doing|done|pinned|overdue|archived
+  //   has:file|image|due  due:today|week|overdue  before:/after:<date>
+  const parsedQuery = createMemo(() => {
+    const toks = {
+      tags: [] as string[],
+      is: [] as string[],
+      has: [] as string[],
+      due: null as string | null,
+      before: null as number | null,
+      after: null as number | null,
+    };
+    const text: string[] = [];
+    for (const part of query().trim().split(/\s+/).filter(Boolean)) {
+      const m = part.match(/^(tag|is|has|due|before|after):(.+)$/i);
+      if (!m) {
+        text.push(part.toLowerCase());
+        continue;
+      }
+      const v = m[2].toLowerCase();
+      switch (m[1].toLowerCase()) {
+        case "tag":
+          toks.tags.push(v.replace(/^#/, ""));
+          break;
+        case "is":
+          toks.is.push(v);
+          break;
+        case "has":
+          toks.has.push(v);
+          break;
+        case "due":
+          toks.due = v;
+          break;
+        case "before": {
+          const ms = Date.parse(m[2]);
+          if (!Number.isNaN(ms)) toks.before = ms;
+          break;
+        }
+        case "after": {
+          const ms = Date.parse(m[2]);
+          if (!Number.isNaN(ms)) toks.after = ms;
+          break;
+        }
+      }
+    }
+    return { toks, text: text.join(" ") };
+  });
+
   const matches = (n: NoteState) => {
-    const q = query().trim().toLowerCase();
+    const { toks, text } = parsedQuery();
     const tag = activeTag();
-    return (
-      (q === "" || n.text.toLowerCase().includes(q) || n.tags.some((t) => t.includes(q))) &&
-      (tag === null || n.tags.includes(tag))
-    );
+    if (tag !== null && !n.tags.includes(tag)) return false;
+    if (text && !(n.text.toLowerCase().includes(text) || n.tags.some((t) => t.includes(text))))
+      return false;
+    for (const t of toks.tags) if (!n.tags.some((x) => x.includes(t))) return false;
+    for (const f of toks.is) {
+      const ok =
+        f === "fav" || f === "favorite" ? n.favorite
+        : f === "task" ? n.status !== null
+        : f === "todo" || f === "doing" || f === "done" ? n.status === f
+        : f === "pinned" ? n.pinned
+        : f === "overdue" ? n.due_ms !== null && n.due_ms < Date.now() && n.status !== "done"
+        : f === "archived" ? n.archived
+        : true;
+      if (!ok) return false;
+    }
+    for (const h of toks.has) {
+      const ok =
+        h === "file" || h === "attachment" ? n.attachments.length > 0
+        : h === "image" ? n.attachments.some((a) => a.mime.startsWith("image/"))
+        : h === "due" ? n.due_ms !== null
+        : true;
+      if (!ok) return false;
+    }
+    if (toks.due) {
+      if (n.due_ms === null) return false;
+      const now = new Date();
+      if (toks.due === "today" && new Date(n.due_ms).toDateString() !== now.toDateString())
+        return false;
+      if (toks.due === "overdue" && !(n.due_ms < Date.now() && n.status !== "done")) return false;
+      if (toks.due === "week" && n.due_ms > now.getTime() + 7 * 86_400_000) return false;
+    }
+    if (toks.before !== null && n.modified_ms >= toks.before) return false;
+    if (toks.after !== null && n.modified_ms <= toks.after) return false;
+    return true;
   };
 
-  const active = createMemo(() => notes().filter((n) => !n.trashed && matches(n)));
+  // Which notes belong to the current sidebar view, before search filtering.
+  const inView = (n: NoteState) => {
+    switch (libView()) {
+      case "inbox":
+        return !n.trashed && !n.archived && !n.pinned && n.tags.length === 0;
+      case "favorites":
+        return !n.trashed && !n.archived && n.favorite;
+      case "desktop":
+        return !n.trashed && n.pinned;
+      case "archive":
+        return !n.trashed && n.archived;
+      default:
+        return !n.trashed && !n.archived;
+    }
+  };
+
+  const active = createMemo(() => notes().filter((n) => inView(n) && matches(n)));
   const trashed = createMemo(() => notes().filter((n) => n.trashed && matches(n)));
-  const activeTotal = createMemo(() => notes().filter((n) => !n.trashed).length);
+  const activeTotal = createMemo(() => notes().filter(inView).length);
   const trashedTotal = createMemo(() => notes().filter((n) => n.trashed).length);
 
+  const viewCounts = createMemo(() => {
+    const c: Record<LibView, number> = { all: 0, inbox: 0, favorites: 0, desktop: 0, archive: 0 };
+    for (const n of notes()) {
+      if (n.trashed) continue;
+      if (n.archived) {
+        c.archive += 1;
+        if (n.pinned) c.desktop += 1;
+        continue;
+      }
+      c.all += 1;
+      if (!n.pinned && n.tags.length === 0) c.inbox += 1;
+      if (n.favorite) c.favorites += 1;
+      if (n.pinned) c.desktop += 1;
+    }
+    return c;
+  });
+
   const tags = createMemo(() =>
-    tallyTags(notes().filter((n) => !n.trashed).map((n) => n.tags)),
+    tallyTags(notes().filter((n) => !n.trashed && !n.archived).map((n) => n.tags)),
   );
 
-  // Backlink counts + edges, recomputed on the 2s poll. Cheap: one pass
+  // Backlink counts + edges, recomputed on refresh. Cheap: one pass
   // over already-loaded note texts.
   const linkIndex = createMemo(() => buildLinkIndex(notes()));
 
-  // The graph always shows every non-trashed note (layout stays stable);
-  // search/tag filtering dims non-matching nodes instead of removing them.
-  const allActive = createMemo(() => notes().filter((n) => !n.trashed));
+  // The graph always shows every non-trashed, non-archived note (layout stays
+  // stable); search/tag filtering dims non-matching nodes instead of removing.
+  const allActive = createMemo(() => notes().filter((n) => !n.trashed && !n.archived));
   const dimmedIds = createMemo(() => {
     if (!query().trim() && activeTag() === null) return new Set<string>();
     return new Set(allActive().filter((n) => !matches(n)).map((n) => n.id));
@@ -325,6 +492,65 @@ export default function Library() {
     cardDragStart = null;
   };
 
+  // ----- multi-select + batch actions -----
+
+  const toggleSelect = (n: NoteState, e: MouseEvent | PointerEvent) => {
+    const next = new Set(selected());
+    if (e.shiftKey && lastSel) {
+      const order = sorted().map((x) => x.id);
+      const a = order.indexOf(lastSel);
+      const b = order.indexOf(n.id);
+      if (a !== -1 && b !== -1) {
+        for (let i = Math.min(a, b); i <= Math.max(a, b); i++) next.add(order[i]);
+      } else {
+        next.add(n.id);
+      }
+    } else if (next.has(n.id)) {
+      next.delete(n.id);
+    } else {
+      next.add(n.id);
+    }
+    lastSel = n.id;
+    setSelected(next);
+  };
+
+  const batch = async (fn: (id: string) => Promise<unknown>, done: (n: number) => string) => {
+    const ids = [...selected()];
+    for (const id of ids) await fn(id);
+    setSelected(new Set<string>());
+    flashMessage(done(ids.length));
+    await refresh();
+  };
+  const plural = (n: number) => `${n} note${n === 1 ? "" : "s"}`;
+  const batchFavorite = () =>
+    batch((id) => invoke("set_favorite", { id, fav: true }), (n) => `Starred ${plural(n)}`);
+  const batchArchive = () => {
+    const unarchive = libView() === "archive";
+    return batch(
+      (id) => invoke("set_archived", { id, archived: !unarchive }),
+      (n) => `${unarchive ? "Unarchived" : "Archived"} ${plural(n)}`,
+    );
+  };
+  const batchTrash = () =>
+    batch((id) => invoke("trash_note", { id }), (n) => `Trashed ${plural(n)}`);
+  const batchApplyTag = () => {
+    const tag = batchTag().trim().replace(/^#/, "").toLowerCase();
+    if (!tag) return;
+    setBatchTag("");
+    return batch((id) => invoke("tag_note", { id, tag }), (n) => `Tagged ${plural(n)} #${tag}`);
+  };
+
+  const toggleFavorite = async (n: NoteState) => {
+    await invoke("set_favorite", { id: n.id, fav: !n.favorite });
+    await refresh();
+  };
+
+  const toggleArchive = async (n: NoteState) => {
+    await invoke("set_archived", { id: n.id, archived: !n.archived });
+    flashMessage(n.archived ? "Returned to the library" : "Archived — find it under 🗃");
+    await refresh();
+  };
+
   const trash = async (n: NoteState) => {
     await invoke("trash_note", { id: n.id });
     await refresh();
@@ -357,10 +583,20 @@ export default function Library() {
         <input
           class="library-search"
           type="search"
-          placeholder="Search notes…"
+          placeholder="Search…  (tag:x  is:fav  due:week  has:file)"
           value={query()}
           onInput={(e) => setQuery(e.currentTarget.value)}
         />
+        <Show when={query().trim()}>
+          <button
+            class="library-icon-btn"
+            title="Save this search to the sidebar"
+            aria-label="Save search"
+            onClick={saveSearch}
+          >
+            🔖
+          </button>
+        </Show>
         <Show when={view() === "cards"}>
           <select
             class="library-select"
@@ -418,6 +654,69 @@ export default function Library() {
           ⚙
         </button>
       </header>
+
+      <div class="library-body">
+        <aside class="library-sidebar">
+          <For each={LIB_VIEWS}>
+            {(v) => (
+              <button
+                class="lib-view-btn"
+                classList={{ active: libView() === v.key }}
+                onClick={() => pickLibView(v.key)}
+              >
+                <span class="lib-view-glyph">{v.glyph}</span>
+                <span class="lib-view-label">{v.label}</span>
+                <span class="lib-view-count">{viewCounts()[v.key]}</span>
+              </button>
+            )}
+          </For>
+          <Show when={savedSearches().length > 0}>
+            <div class="lib-side-heading">Saved searches</div>
+            <For each={savedSearches()}>
+              {(q) => (
+                <div class="lib-saved-row">
+                  <button class="lib-saved-btn" title={q} onClick={() => setQuery(q)}>
+                    🔖 <span>{q}</span>
+                  </button>
+                  <button class="lib-saved-x" title="Remove" onClick={() => removeSearch(q)}>
+                    ✕
+                  </button>
+                </div>
+              )}
+            </For>
+          </Show>
+        </aside>
+        <div class="library-main-col">
+
+      <Show when={selected().size > 0}>
+        <div class="batch-bar">
+          <span class="batch-count">{selected().size} selected</span>
+          <button class="library-btn" onClick={() => void batchFavorite()}>
+            ★ Favorite
+          </button>
+          <button class="library-btn" onClick={() => void batchArchive()}>
+            {libView() === "archive" ? "Unarchive" : "🗃 Archive"}
+          </button>
+          <input
+            class="batch-tag-input"
+            placeholder="#tag"
+            value={batchTag()}
+            onInput={(e) => setBatchTag(e.currentTarget.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") void batchApplyTag();
+            }}
+          />
+          <button class="library-btn" onClick={() => void batchApplyTag()}>
+            Tag
+          </button>
+          <button class="library-btn library-btn-danger" onClick={() => void batchTrash()}>
+            🗑 Trash
+          </button>
+          <button class="library-btn" onClick={() => setSelected(new Set<string>())}>
+            ✕
+          </button>
+        </div>
+      </Show>
 
       <Show when={tags().length > 0}>
         <div class="tag-chips">
@@ -496,7 +795,15 @@ export default function Library() {
               <p>
                 {query().trim() || activeTag()
                   ? "No notes match."
-                  : "No notes yet — pull one off the pad!"}
+                  : libView() === "inbox"
+                    ? "Inbox zero — untagged, unpinned captures land here."
+                    : libView() === "favorites"
+                      ? "No favorites yet — star a note with ☆."
+                      : libView() === "desktop"
+                        ? "Nothing pinned on this desktop."
+                        : libView() === "archive"
+                          ? "The archive is empty."
+                          : "No notes yet — pull one off the pad!"}
               </p>
             </div>
           }
@@ -514,11 +821,19 @@ export default function Library() {
                     {(n) => (
                 <div
                   class="sticky-card"
+                  classList={{ selected: selected().has(n.id) }}
                   data-theme={n.color ?? undefined}
                   data-paper={n.paper ?? undefined}
                   style={{ "--tilt": `${tilt(n.id)}deg` }}
-                  title="Drag out to the desktop"
-                  onPointerDown={(e) => onCardPointerDown(n, e)}
+                  title="Drag out to the desktop — Ctrl+click to select"
+                  onPointerDown={(e) => {
+                    if (e.ctrlKey || e.metaKey || e.shiftKey) {
+                      e.preventDefault();
+                      toggleSelect(n, e);
+                      return;
+                    }
+                    onCardPointerDown(n, e);
+                  }}
                   onPointerMove={onCardPointerMove}
                   onPointerUp={onCardPointerUp}
                   onPointerCancel={onCardPointerCancel}
@@ -585,11 +900,26 @@ export default function Library() {
                   </div>
                   <div class="sticky-card-actions">
                     <button
+                      class="library-btn card-star"
+                      classList={{ faved: n.favorite }}
+                      title={n.favorite ? "Unstar" : "Star"}
+                      onClick={() => void toggleFavorite(n)}
+                    >
+                      {n.favorite ? "★" : "☆"}
+                    </button>
+                    <button
                       class="library-btn"
                       onClick={() => void togglePin(n)}
                       title={n.pinned ? "Unpin from desktop" : "Pin to desktop"}
                     >
                       {n.pinned ? "Unpin" : "Pin"}
+                    </button>
+                    <button
+                      class="library-btn"
+                      title={n.archived ? "Return to the library" : "Archive (put away, keep forever)"}
+                      onClick={() => void toggleArchive(n)}
+                    >
+                      {n.archived ? "Unarchive" : "🗃"}
                     </button>
                     <button
                       class="library-btn library-btn-danger"
@@ -608,6 +938,8 @@ export default function Library() {
           </For>
         </Show>
         </Show>
+      </div>
+        </div>
       </div>
 
       <footer class="library-footer">

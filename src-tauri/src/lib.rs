@@ -22,7 +22,7 @@ mod visibility;
 use pinq_core::Rect;
 use std::sync::Arc;
 use std::time::Duration;
-use tauri::{Manager, WindowEvent};
+use tauri::{Emitter, Manager, WindowEvent};
 
 pub fn run() {
     tauri::Builder::default()
@@ -109,6 +109,8 @@ pub fn run() {
             notes::grow_note_window,
             notes::set_note_due,
             notes::set_note_status,
+            notes::set_favorite,
+            notes::set_archived,
             pull::create_note_from_template,
             notes::add_text_item,
             notes::open_note,
@@ -187,7 +189,11 @@ pub fn run() {
             // this a synced-in note is invisible until the library is opened).
             {
                 let handle = app.handle().clone();
-                store.set_commit_hook(move || sync::wake(&handle));
+                store.set_commit_hook(move || {
+                    sync::wake(&handle);
+                    // Panels refresh on this instead of polling.
+                    let _ = handle.emit("pinq-changed", ());
+                });
                 let handle = app.handle().clone();
                 store.set_arrivals_hook(move |ids| {
                     use tauri_plugin_notification::NotificationExt;

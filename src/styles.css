@@ -2359,6 +2359,152 @@ body[data-note-paper="stars"] .note-canvas {
   border-bottom: 2px solid var(--pad-b);
 }
 
+/* Sidebar + main column between the topbar and the footer. */
+.library-body {
+  flex: 1;
+  display: flex;
+  min-height: 0;
+}
+
+.library-sidebar {
+  flex: none;
+  width: 158px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 10px 8px;
+  border-right: 1px solid var(--lib-border);
+  overflow-y: auto;
+  scrollbar-width: thin;
+}
+
+.library-main-col {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+}
+
+.lib-view-btn {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 6px 9px;
+  border: none;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--lib-fg);
+  font-size: 12.5px;
+  text-align: left;
+  cursor: pointer;
+}
+.lib-view-btn:hover {
+  background: color-mix(in srgb, var(--lib-fg) 8%, transparent);
+}
+.lib-view-btn.active {
+  background: color-mix(in srgb, var(--pad-a) 22%, transparent);
+  font-weight: 600;
+}
+.lib-view-glyph {
+  width: 16px;
+  text-align: center;
+  flex: none;
+}
+.lib-view-label {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.lib-view-count {
+  flex: none;
+  font-size: 10.5px;
+  opacity: 0.55;
+}
+
+.lib-side-heading {
+  margin: 10px 4px 2px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  opacity: 0.5;
+}
+.lib-saved-row {
+  display: flex;
+  align-items: center;
+}
+.lib-saved-btn {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 9px;
+  border: none;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--lib-fg);
+  font-size: 11.5px;
+  cursor: pointer;
+  text-align: left;
+}
+.lib-saved-btn span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.lib-saved-btn:hover {
+  background: color-mix(in srgb, var(--lib-fg) 8%, transparent);
+}
+.lib-saved-x {
+  flex: none;
+  border: none;
+  background: transparent;
+  color: var(--lib-fg);
+  opacity: 0;
+  font-size: 10px;
+  cursor: pointer;
+  padding: 2px 4px;
+}
+.lib-saved-row:hover .lib-saved-x {
+  opacity: 0.6;
+}
+
+/* Multi-select batch bar. */
+.batch-bar {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  background: color-mix(in srgb, var(--pad-a) 16%, var(--lib-bg));
+  border-bottom: 1px solid var(--lib-border);
+}
+.batch-count {
+  font-size: 12px;
+  font-weight: 600;
+  margin-right: 4px;
+}
+.batch-tag-input {
+  width: 90px;
+  padding: 4px 8px;
+  border: 1px solid var(--lib-border);
+  border-radius: 6px;
+  background: var(--lib-bg);
+  color: var(--lib-fg);
+  font-size: 12px;
+}
+
+.sticky-card.selected {
+  outline: 2px solid var(--pad-a);
+  outline-offset: 2px;
+}
+.card-star.faved {
+  color: #e7a918;
+}
+
 .library-count {
   font-size: 11px;
   color: var(--lib-muted);

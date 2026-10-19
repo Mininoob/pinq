@@ -136,6 +136,11 @@ pub enum Action {
     DueSet { id: NoteId, at_ms: u64, due_ms: Option<u64> },
     /// Task status ("todo" | "doing" | "done") set or cleared (None = not a task).
     StatusSet { id: NoteId, at_ms: u64, status: Option<String> },
+    /// Starred in the library.
+    FavoriteSet { id: NoteId, at_ms: u64, fav: bool },
+    /// Put away: hidden from the library's default views, search, and the
+    /// graph, but never gone. Archiving closes the note's windows everywhere.
+    ArchiveSet { id: NoteId, at_ms: u64, archived: bool },
 }
 
 impl Action {
@@ -163,7 +168,9 @@ impl Action {
             | Action::NoteDeleted { id, .. }
             | Action::ReminderSet { id, .. }
             | Action::DueSet { id, .. }
-            | Action::StatusSet { id, .. } => id,
+            | Action::StatusSet { id, .. }
+            | Action::FavoriteSet { id, .. }
+            | Action::ArchiveSet { id, .. } => id,
         }
     }
 }
@@ -194,6 +201,12 @@ pub struct NoteState {
     /// Task status ("todo" | "doing" | "done"); None = not a task.
     #[serde(default)]
     pub status: Option<String>,
+    /// Starred in the library.
+    #[serde(default)]
+    pub favorite: bool,
+    /// Put away — excluded from default views and search, never deleted.
+    #[serde(default)]
+    pub archived: bool,
     #[serde(default)]
     pub tags: Vec<String>,
     /// Derived from `items`; kept for search, previews, history, and export.
@@ -233,6 +246,8 @@ pub fn apply(notes: &mut HashMap<NoteId, NoteState>, action: Action) {
                         remind_ms: None,
                         due_ms: None,
                         status: None,
+                        favorite: false,
+                        archived: false,
                         color: None,
                         paper: None,
                         tags: Vec::new(),
@@ -326,6 +341,18 @@ pub fn apply(notes: &mut HashMap<NoteId, NoteState>, action: Action) {
             Action::StatusSet { id, at_ms, status } => {
                 if let Some(n) = notes.get_mut(&id) {
                     n.status = status;
+                    n.modified_ms = at_ms;
+                }
+            }
+            Action::FavoriteSet { id, at_ms, fav } => {
+                if let Some(n) = notes.get_mut(&id) {
+                    n.favorite = fav;
+                    n.modified_ms = at_ms;
+                }
+            }
+            Action::ArchiveSet { id, at_ms, archived } => {
+                if let Some(n) = notes.get_mut(&id) {
+                    n.archived = archived;
                     n.modified_ms = at_ms;
                 }
             }

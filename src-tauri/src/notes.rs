@@ -219,7 +219,7 @@ pub fn reconcile_after_sync(app: &AppHandle, affected: &[String]) {
         store.reconcile_presentation(id);
         let gone = match store.get(id) {
             None => true,
-            Some(n) => n.trashed,
+            Some(n) => n.trashed || n.archived,
         };
         if gone {
             parked.0.lock().unwrap().remove(id);
@@ -484,6 +484,38 @@ pub fn set_note_status(
         }
     }
     store.set_status(&id, status).map_err(|e| e.to_string())?;
+    crate::sync::note_edited(&app, &id);
+    Ok(())
+}
+
+/// Star or unstar a note in the library.
+#[tauri::command]
+pub fn set_favorite(
+    app: AppHandle,
+    store: State<'_, Arc<Store>>,
+    id: String,
+    fav: bool,
+) -> Result<(), String> {
+    store.set_favorite(&id, fav).map_err(|e| e.to_string())?;
+    crate::sync::note_edited(&app, &id);
+    Ok(())
+}
+
+/// Archive (put away) or unarchive a note. Archiving closes its window here;
+/// other devices follow when the op syncs. Async: window teardown.
+#[tauri::command]
+pub async fn set_archived(
+    app: AppHandle,
+    store: State<'_, Arc<Store>>,
+    id: String,
+    archived: bool,
+) -> Result<(), String> {
+    store.set_archived(&id, archived).map_err(|e| e.to_string())?;
+    if archived {
+        if let Some(win) = app.get_webview_window(&window_label(&id)) {
+            let _ = win.destroy();
+        }
+    }
     crate::sync::note_edited(&app, &id);
     Ok(())
 }
