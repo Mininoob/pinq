@@ -24,6 +24,106 @@ pub fn now_ms() -> u64 {
         .unwrap_or(0)
 }
 
+/// Line-based three-way merge for concurrently edited note text (spec §20
+/// lite). Returns the merged text; where both sides changed the same region
+/// differently, BOTH versions are kept, separated by a marker line — nothing
+/// is ever silently dropped.
+///
+/// The merge is SYMMETRIC: `merge3_lines(base, a, b) == merge3_lines(base, b, a)`
+/// (conflicting hunks are emitted in lexicographic order), so two devices that
+/// each merge the other's concurrent edit produce byte-identical text and
+/// their replicas converge without ping-ponging.
+pub const MERGE_DIVIDER: &str = "····· also (merged from another device) ·····";
+
+pub fn merge3_lines(base: &str, a: &str, b: &str) -> String {
+    if a == b {
+        return a.to_string();
+    }
+    if base == a {
+        return b.to_string();
+    }
+    if base == b {
+        return a.to_string();
+    }
+    let bl: Vec<&str> = base.split('\n').collect();
+    let al: Vec<&str> = a.split('\n').collect();
+    let cl: Vec<&str> = b.split('\n').collect();
+
+    // LCS alignment of each side against the base: `keep[i]` = the side's line
+    // index matched to base line i, or None where the base line was removed.
+    fn align(base: &[&str], side: &[&str]) -> Vec<Option<usize>> {
+        let n = base.len();
+        let m = side.len();
+        // DP over suffix lengths (notes are small; n*m is fine here).
+        let mut dp = vec![vec![0u32; m + 1]; n + 1];
+        for i in (0..n).rev() {
+            for j in (0..m).rev() {
+                dp[i][j] = if base[i] == side[j] {
+                    dp[i + 1][j + 1] + 1
+                } else {
+                    dp[i + 1][j].max(dp[i][j + 1])
+                };
+            }
+        }
+        let mut out = vec![None; n];
+        let (mut i, mut j) = (0usize, 0usize);
+        while i < n && j < m {
+            if base[i] == side[j] {
+                out[i] = Some(j);
+                i += 1;
+                j += 1;
+            } else if dp[i + 1][j] >= dp[i][j + 1] {
+                i += 1;
+            } else {
+                j += 1;
+            }
+        }
+        out
+    }
+
+    let ka = align(&bl, &al);
+    let kb = align(&bl, &cl);
+
+    // Walk the base; between stable (matched-in-both) lines, each side owns a
+    // replacement region for the same base region. A side whose region equals
+    // the base is unchanged there, so the other side's edit wins; when both
+    // changed it differently, keep both (lexicographic order for symmetry).
+    let mut out: Vec<String> = Vec::new();
+    let emit_region = |out: &mut Vec<String>, rbase: &[&str], ra: &[&str], rb: &[&str]| {
+        if ra == rb || rb == rbase {
+            out.extend(ra.iter().map(|s| s.to_string()));
+        } else if ra == rbase {
+            out.extend(rb.iter().map(|s| s.to_string()));
+        } else if ra.is_empty() {
+            out.extend(rb.iter().map(|s| s.to_string()));
+        } else if rb.is_empty() {
+            out.extend(ra.iter().map(|s| s.to_string()));
+        } else {
+            let (first, second) = if ra.join("\n") <= rb.join("\n") { (ra, rb) } else { (rb, ra) };
+            out.extend(first.iter().map(|s| s.to_string()));
+            out.push(MERGE_DIVIDER.to_string());
+            out.extend(second.iter().map(|s| s.to_string()));
+        }
+    };
+
+    let (mut pa, mut pb, mut pbase) = (0usize, 0usize, 0usize); // next unconsumed line
+    for i in 0..bl.len() {
+        if let (Some(ja), Some(jb)) = (ka[i], kb[i]) {
+            // Stable line: flush what each side made of the base region before it…
+            emit_region(&mut out, &bl[pbase..i], &al[pa..ja], &cl[pb..jb]);
+            // …then the common line itself.
+            out.push(bl[i].to_string());
+            pa = ja + 1;
+            pb = jb + 1;
+            pbase = i + 1;
+        }
+        // A base line dropped by either side contributes nothing; any
+        // replacement text it got lands in the next region flush.
+    }
+    emit_region(&mut out, &bl[pbase..], &al[pa..], &cl[pb..]);
+    out.join("\n")
+}
+
 /// Physical-pixel rectangle on the virtual desktop (prototype simplification;
 /// the product stores monitor-relative logical rects keyed by stable monitor id).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
@@ -650,6 +750,32 @@ mod tests {
             Action::ReminderSet { id: id.clone(), at_ms: 5, remind_ms: None },
         ]);
         assert_eq!(notes[&id].remind_ms, None);
+    }
+
+    #[test]
+    fn merge3_combines_distinct_regions_cleanly() {
+        let base = "title\nalpha\nmiddle\nomega";
+        let a = "title\nalpha EDITED\nmiddle\nomega"; // A edits line 2
+        let b = "title\nalpha\nmiddle\nomega\nnew last line"; // B appends
+        let m = merge3_lines(base, a, b);
+        assert_eq!(m, "title\nalpha EDITED\nmiddle\nomega\nnew last line");
+        // Fast paths.
+        assert_eq!(merge3_lines(base, base, b), b);
+        assert_eq!(merge3_lines(base, a, base), a);
+        assert_eq!(merge3_lines(base, a, a), a);
+    }
+
+    #[test]
+    fn merge3_conflicts_keep_both_sides_and_are_symmetric() {
+        let base = "shopping\nmilk";
+        let a = "shopping\noat milk";
+        let b = "shopping\nwhole milk";
+        let ab = merge3_lines(base, a, b);
+        let ba = merge3_lines(base, b, a);
+        assert_eq!(ab, ba, "merge must be symmetric so replicas converge");
+        assert!(ab.contains("oat milk") && ab.contains("whole milk"), "nothing dropped");
+        assert!(ab.contains(MERGE_DIVIDER));
+        assert!(ab.starts_with("shopping\n"), "common prefix stays single");
     }
 
     #[test]

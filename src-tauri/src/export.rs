@@ -185,16 +185,62 @@ fn restore_backup(
     Ok(restored)
 }
 
-/// Returns the archive path.
+/// Encrypted backup container: magic + nonce + ChaCha20Poly1305 ciphertext of
+/// the backup zip, keyed off the space key (spec §21 — a backup that leaks
+/// from a drive or cloud folder stays sealed; the recovery phrase IS the key).
+const BACKUP_MAGIC: &[u8; 8] = b"PINQBAK1";
+
+fn backup_seal(space_key: &[u8; 32], plain: &[u8]) -> Result<Vec<u8>, String> {
+    use chacha20poly1305::{aead::Aead, ChaCha20Poly1305, KeyInit};
+    let key = blake3::keyed_hash(space_key, b"pinq-backup-v1");
+    let cipher = ChaCha20Poly1305::new(key.as_bytes().into());
+    let mut nonce = [0u8; 12];
+    getrandom::fill(&mut nonce).map_err(|e| e.to_string())?;
+    let ct = cipher
+        .encrypt(&nonce.into(), plain)
+        .map_err(|_| "backup encrypt failed".to_string())?;
+    let mut out = Vec::with_capacity(20 + ct.len());
+    out.extend_from_slice(BACKUP_MAGIC);
+    out.extend_from_slice(&nonce);
+    out.extend_from_slice(&ct);
+    Ok(out)
+}
+
+fn backup_open(space_key: &[u8; 32], bytes: &[u8]) -> Result<Vec<u8>, String> {
+    use chacha20poly1305::{aead::Aead, ChaCha20Poly1305, KeyInit};
+    if bytes.len() < 21 || &bytes[..8] != BACKUP_MAGIC {
+        return Err("not a Pinq encrypted backup".into());
+    }
+    let nonce: [u8; 12] = bytes[8..20].try_into().unwrap();
+    let key = blake3::keyed_hash(space_key, b"pinq-backup-v1");
+    let cipher = ChaCha20Poly1305::new(key.as_bytes().into());
+    cipher.decrypt(&nonce.into(), &bytes[20..]).map_err(|_| {
+        "This backup belongs to a different space — restore its recovery phrase first, then drop the backup again".to_string()
+    })
+}
+
+/// Returns the archive path. The backup is sealed with the space key; the
+/// recovery phrase (Settings) is what unlocks it on a fresh machine.
 #[tauri::command]
-pub fn backup_archive(app: AppHandle, store: State<'_, Arc<Store>>) -> Result<String, String> {
+pub fn backup_archive(
+    app: AppHandle,
+    store: State<'_, Arc<Store>>,
+    sync_state: State<'_, crate::sync::SyncState>,
+) -> Result<String, String> {
     use tauri::Manager;
     let docs = app.path().document_dir().map_err(|e| e.to_string())?;
     let dir = docs.join("Pinq Exports");
     std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
-    let path = dir.join(format!("pinq-backup-{}.zip", pinq_core::now_ms()));
+    let stamp = pinq_core::now_ms();
+    let tmp = dir.join(format!(".pinq-backup-{stamp}.tmp"));
     let blobs = crate::blobs::blobs_dir(&app).map_err(|e| e.to_string())?;
-    write_backup(&path, &store.all_notes(), &blobs).map_err(|e| e.to_string())?;
+    write_backup(&tmp, &store.all_notes(), &blobs).map_err(|e| e.to_string())?;
+    let plain = std::fs::read(&tmp).map_err(|e| e.to_string())?;
+    let _ = std::fs::remove_file(&tmp);
+    let space_key = *sync_state.space_key.lock().unwrap();
+    let sealed = backup_seal(&space_key, &plain)?;
+    let path = dir.join(format!("pinq-backup-{stamp}.pinqbak"));
+    std::fs::write(&path, sealed).map_err(|e| e.to_string())?;
     let _ = open_with_default(&dir);
     Ok(path.display().to_string())
 }
@@ -260,11 +306,13 @@ pub fn export_all(app: AppHandle, store: State<'_, Arc<Store>>) -> Result<String
     Ok(dir.display().to_string())
 }
 
-/// Import dropped `.md`/`.txt` files as filed (unpinned) notes. Returns the count.
+/// Import dropped `.md`/`.txt` files as filed (unpinned) notes; `.zip` and
+/// `.pinqbak` backups restore in full. Returns the count.
 #[tauri::command]
 pub fn import_files(
     app: AppHandle,
     store: State<'_, Arc<Store>>,
+    sync_state: State<'_, crate::sync::SyncState>,
     paths: Vec<String>,
 ) -> Result<usize, String> {
     let wa = crate::monitors::primary_work_area(&app);
@@ -288,6 +336,19 @@ pub fn import_files(
         if ext.as_deref() == Some("zip") {
             let blobs = crate::blobs::blobs_dir(&app).map_err(|e| e.to_string())?;
             count += restore_backup(path, &store, &blobs).map_err(|e| e.to_string())?;
+            continue;
+        }
+        // Encrypted backups: unseal with the space key, then restore normally.
+        if ext.as_deref() == Some("pinqbak") {
+            let bytes = std::fs::read(path).map_err(|e| e.to_string())?;
+            let space_key = *sync_state.space_key.lock().unwrap();
+            let plain = backup_open(&space_key, &bytes)?;
+            let tmp = std::env::temp_dir().join(format!("pinq-restore-{}.zip", pinq_core::now_ms()));
+            std::fs::write(&tmp, plain).map_err(|e| e.to_string())?;
+            let blobs = crate::blobs::blobs_dir(&app).map_err(|e| e.to_string())?;
+            let restored = restore_backup(&tmp, &store, &blobs).map_err(|e| e.to_string());
+            let _ = std::fs::remove_file(&tmp);
+            count += restored?;
             continue;
         }
         if !matches!(ext.as_deref(), Some("md") | Some("txt")) {
@@ -314,6 +375,15 @@ pub fn import_files(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn encrypted_backup_roundtrips_and_rejects_wrong_key() {
+        let key = [7u8; 32];
+        let sealed = backup_seal(&key, b"zip bytes here").unwrap();
+        assert_eq!(backup_open(&key, &sealed).unwrap(), b"zip bytes here");
+        assert!(backup_open(&[8u8; 32], &sealed).is_err(), "wrong space key must fail");
+        assert!(backup_open(&key, b"garbage").is_err());
+    }
 
     #[test]
     fn checkbox_glyphs_roundtrip_markdown() {

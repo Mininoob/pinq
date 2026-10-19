@@ -498,6 +498,34 @@ body[data-mode="dark"] {
   opacity: 0.7;
 }
 
+/* Recovery phrase + restore (Settings). */
+.recovery-phrase {
+  margin: 8px 0;
+  padding: 10px 12px;
+  border: 1px dashed var(--lib-border);
+  border-radius: 8px;
+  font: 12.5px/1.8 ui-monospace, Consolas, monospace;
+  word-spacing: 6px;
+  user-select: all;
+  -webkit-user-select: all;
+}
+.recovery-restore {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  margin-top: 8px;
+}
+.recovery-input {
+  flex: 1;
+  resize: none;
+  padding: 6px 8px;
+  border: 1px solid var(--lib-border);
+  border-radius: 6px;
+  background: transparent;
+  color: inherit;
+  font-size: 12px;
+}
+
 /* Library card badges. */
 .card-status.st-done {
   color: #34a860;

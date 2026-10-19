@@ -577,7 +577,7 @@ export default function Library() {
   return (
     <div class="library">
       <Show when={dropping()}>
-        <div class="drop-overlay">Drop to import (.md / .txt / .zip backup)</div>
+        <div class="drop-overlay">Drop to import (.md / .txt / .pinqbak or .zip backup)</div>
       </Show>
       <header class="library-topbar">
         <input
@@ -639,7 +639,7 @@ export default function Library() {
         </button>
         <button
           class="library-icon-btn"
-          title="Full backup (.zip with notes + attachments) — drop it back here to restore"
+          title="Encrypted full backup (notes + attachments, sealed with your space key) — drop it back here to restore"
           aria-label="Backup archive"
           onClick={() => void backupAll()}
         >

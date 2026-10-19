@@ -656,10 +656,24 @@ impl Store {
     /// canonical order (at_ms, device, ctr) — the same total order on every
     /// device — so replicas converge no matter which direction synced first.
     /// Returns the ids of notes whose state actually changed hands.
-    pub fn apply_remote_ops(&self, ops: &[SyncOp]) -> io::Result<Vec<NoteId>> {
+    ///
+    /// `their_vv` is the sender's version vector when known (live sessions).
+    /// With it, a text box edited concurrently on both devices is three-way
+    /// MERGED instead of last-write-wins: the fork-point text is recovered
+    /// from the op-log, both edits are combined line by line (conflicting
+    /// lines keep both versions), and the merged text is committed as an
+    /// ordinary local edit that syncs back. merge3_lines is symmetric, so
+    /// when both devices merge the same conflict they produce identical text
+    /// and converge. Without a vv (relay envelopes), behavior is unchanged.
+    pub fn apply_remote_ops(
+        &self,
+        ops: &[SyncOp],
+        their_vv: Option<&HashMap<String, u64>>,
+    ) -> io::Result<Vec<NoteId>> {
         if ops.is_empty() {
             return Ok(Vec::new());
         }
+        let merges = their_vv.map(|vv| self.plan_text_merges(ops, vv)).unwrap_or_default();
         let mut affected: std::collections::BTreeSet<NoteId> = Default::default();
         let mut rebuilt: Vec<(NoteId, Option<NoteState>)> = Vec::new();
         // Snapshot which notes exist before the merge, so brand-new arrivals
@@ -708,12 +722,104 @@ impl Store {
                 }
             }
         }
+        // Commit planned conflict merges as ordinary local edits (newest
+        // timestamp, so the merged text wins the fold on every device).
+        // set_item_text's no-change guard drops merges the fold already matches.
+        for (id, item_id, merged) in merges {
+            let _ = self.set_item_text(&id, &item_id, merged);
+        }
         if !arrivals.is_empty() {
             if let Some(hook) = self.arrivals_hook.get() {
                 hook(&arrivals);
             }
         }
         Ok(affected.into_iter().collect())
+    }
+
+    /// Find incoming text edits that collide with local edits the sender
+    /// hasn't seen, and compute their three-way merges. Read-only; called
+    /// BEFORE the incoming batch lands so "our log" still means "what both
+    /// sides could have known".
+    fn plan_text_merges(
+        &self,
+        ops: &[SyncOp],
+        their_vv: &HashMap<String, u64>,
+    ) -> Vec<(NoteId, String, String)> {
+        let covered =
+            |device: &str, ctr: u64| ctr <= their_vv.get(device).copied().unwrap_or(0);
+        // Current fold text per item, snapshotted first (lock order: notes,
+        // then db — never both at once).
+        let mut current_texts: HashMap<(NoteId, String), String> = HashMap::new();
+        {
+            let notes = self.notes.lock().unwrap();
+            for op in ops {
+                let Ok(Action::ItemTextChanged { id, item_id, .. }) =
+                    serde_json::from_str::<Action>(&op.action)
+                else {
+                    continue;
+                };
+                let Some(n) = notes.get(&id) else { continue };
+                let Some(text) = n.items.iter().find(|i| i.item_id == item_id).and_then(|i| {
+                    match &i.content {
+                        pinq_core::ItemContent::Text { text } => Some(text.clone()),
+                        _ => None,
+                    }
+                }) else {
+                    continue;
+                };
+                current_texts.insert((id, item_id), text);
+            }
+        }
+        let mut merges = Vec::new();
+        let conn = self.db.lock().unwrap();
+        for op in ops {
+            let Ok(Action::ItemTextChanged { id, item_id, text: incoming, .. }) =
+                serde_json::from_str::<Action>(&op.action)
+            else {
+                continue;
+            };
+            let Some(current) = current_texts.get(&(id.clone(), item_id.clone())) else {
+                continue;
+            };
+            if current == &incoming {
+                continue;
+            }
+            // This item's text ops already in our log, canonical order.
+            let history: Vec<(String, u64, String)> = {
+                let Ok(mut stmt) = conn.prepare(
+                    "SELECT device, ctr, json_extract(action,'$.text') FROM oplog
+                     WHERE json_extract(action,'$.kind')='item_text_changed'
+                       AND json_extract(action,'$.id')=?1
+                       AND json_extract(action,'$.item_id')=?2
+                     ORDER BY at_ms, device, ctr",
+                ) else {
+                    continue;
+                };
+                let Ok(rows) = stmt.query_map(rusqlite::params![id, item_id], |r| {
+                    Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)? as u64, r.get::<_, String>(2)?))
+                }) else {
+                    continue;
+                };
+                rows.filter_map(|r| r.ok()).collect()
+            };
+            // Concurrent only if OUR newest edit is one the sender never saw;
+            // if they saw it, their edit is sequential and last-write-wins is
+            // exactly right.
+            let Some((last_dev, last_ctr, _)) = history.last() else { continue };
+            if covered(last_dev, *last_ctr) {
+                continue;
+            }
+            // Fork point: the newest edit the sender HAD seen (or empty).
+            let base = history
+                .iter()
+                .rev()
+                .find(|(d, c, _)| covered(d, *c))
+                .map(|(_, _, t)| t.clone())
+                .unwrap_or_default();
+            let merged = pinq_core::merge3_lines(&base, current, &incoming);
+            merges.push((id, item_id, merged));
+        }
+        merges
     }
 
     pub fn get(&self, id: &str) -> Option<NoteState> {
@@ -1797,10 +1903,12 @@ mod tests {
         std::fs::remove_dir_all(dir).ok();
     }
 
-    /// Pull everything B is missing from A and apply it — one sync direction.
+    /// Pull everything B is missing from A and apply it — one sync direction,
+    /// with A's version vector along (as a live session would carry it).
     fn sync_a_to_b(a: &Store, b: &Store) -> Vec<String> {
+        let a_vv = a.version_vector().unwrap();
         let ops = a.ops_missing_from(&b.version_vector().unwrap()).unwrap();
-        b.apply_remote_ops(&ops).unwrap()
+        b.apply_remote_ops(&ops, Some(&a_vv)).unwrap()
     }
 
     /// Due date and status are content: they sync, persist across reopen,
@@ -2063,6 +2171,51 @@ mod tests {
         assert_eq!(n.paper.as_deref(), Some("ruled"));
         assert_eq!(n.tags, vec!["from-b"]);
 
+        std::fs::remove_dir_all(da).ok();
+        std::fs::remove_dir_all(db_).ok();
+    }
+
+    /// Spec §20: the same text box edited offline on two devices must MERGE,
+    /// not silently drop one side, and both replicas must converge.
+    #[test]
+    fn concurrent_item_edits_merge_instead_of_losing_one() {
+        let (da, db_) = (temp_dir(), temp_dir());
+        let a = Store::open(&da).unwrap();
+        let b = Store::open(&db_).unwrap();
+        let note = a.create_note(rect()).unwrap();
+        let item = pinq_core::CanvasItem::text_item(8.0, 8.0, 160.0, "groceries\nmilk".into());
+        a.add_item(&note.id, item.clone()).unwrap();
+        sync_a_to_b(&a, &b);
+
+        // Offline, both devices edit the SAME text box differently.
+        a.set_item_text(&note.id, &item.item_id, "groceries\noat milk".into()).unwrap();
+        b.set_item_text(&note.id, &item.item_id, "groceries\nwhole milk".into()).unwrap();
+
+        let text_on = |s: &Store| {
+            s.get(&note.id)
+                .unwrap()
+                .items
+                .iter()
+                .find_map(|i| match &i.content {
+                    pinq_core::ItemContent::Text { text } => Some(text.clone()),
+                    _ => None,
+                })
+                .unwrap()
+        };
+
+        // B receives A's edit: three-way merge instead of last-write-wins.
+        sync_a_to_b(&a, &b);
+        let merged = text_on(&b);
+        assert!(
+            merged.contains("oat milk") && merged.contains("whole milk"),
+            "an edit was lost: {merged:?}"
+        );
+        assert!(merged.starts_with("groceries\n"), "common lines stay single");
+
+        // The merge syncs back as an ordinary edit; replicas converge.
+        sync_a_to_b(&b, &a);
+        assert_eq!(text_on(&a), merged);
+        assert_same_state(&a, &b);
         std::fs::remove_dir_all(da).ok();
         std::fs::remove_dir_all(db_).ok();
     }

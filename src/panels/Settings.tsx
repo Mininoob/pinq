@@ -132,6 +132,10 @@ export default function Settings() {
   const [removeArm, setRemoveArm] = createSignal<string | null>(null);
   const [rotateArm, setRotateArm] = createSignal(false);
   const [rotateMsg, setRotateMsg] = createSignal<string | null>(null);
+  const [phrase, setPhrase] = createSignal<string | null>(null);
+  const [restoreInput, setRestoreInput] = createSignal("");
+  const [restoreArm, setRestoreArm] = createSignal(false);
+  const [restoreMsg, setRestoreMsg] = createSignal<string | null>(null);
   // The peer we clicked "Pair" on, so its row can show the waiting hint.
   const [requestAddr, setRequestAddr] = createSignal<string | null>(null);
   let syncTimer: number | undefined;
@@ -181,6 +185,27 @@ export default function Settings() {
   };
 
   const syncNow = () => void invoke("sync_now");
+
+  const togglePhrase = async () =>
+    setPhrase(phrase() ? null : await invoke<string>("recovery_phrase"));
+
+  // Two-step restore: adopting a phrase switches this device's space.
+  const restorePhrase = async () => {
+    if (!restoreInput().trim()) return;
+    if (!restoreArm()) {
+      setRestoreArm(true);
+      window.setTimeout(() => setRestoreArm(false), 4000);
+      return;
+    }
+    setRestoreArm(false);
+    try {
+      const fp = await invoke<string>("restore_from_phrase", { phrase: restoreInput() });
+      setRestoreMsg(`Space restored — fingerprint ${fp}. Pair a device or drop a backup to pull notes in.`);
+      setRestoreInput("");
+    } catch (e) {
+      setRestoreMsg(String(e));
+    }
+  };
 
   // Two-step rotate: mints a new space key sealed to each remaining device.
   const rotateSpace = async () => {
@@ -593,6 +618,42 @@ export default function Settings() {
                 </div>
                 <Show when={rotateMsg()}>
                   <div class="sync-status">{rotateMsg()}</div>
+                </Show>
+              </div>
+
+              <div class="sync-recovery">
+                <span class="sync-label">Recovery</span>
+                <p class="settings-hint">
+                  The 24-word phrase IS this space's key: it unlocks encrypted
+                  backups (.pinqbak) and lets a fresh machine rejoin. Write it
+                  down somewhere safe — anyone holding it holds your notes.
+                </p>
+                <div class="pair-actions">
+                  <button class="library-btn" onClick={() => void togglePhrase()}>
+                    {phrase() ? "Hide phrase" : "Show recovery phrase"}
+                  </button>
+                </div>
+                <Show when={phrase()}>
+                  <div class="recovery-phrase">{phrase()}</div>
+                </Show>
+                <div class="recovery-restore">
+                  <textarea
+                    class="recovery-input"
+                    rows={2}
+                    placeholder="Restore: paste a 24-word recovery phrase…"
+                    value={restoreInput()}
+                    onInput={(e) => setRestoreInput(e.currentTarget.value)}
+                  />
+                  <button
+                    class="library-btn"
+                    classList={{ "library-btn-danger": restoreArm() }}
+                    onClick={() => void restorePhrase()}
+                  >
+                    {restoreArm() ? "Really switch space?" : "Restore"}
+                  </button>
+                </div>
+                <Show when={restoreMsg()}>
+                  <div class="sync-status">{restoreMsg()}</div>
                 </Show>
               </div>
 

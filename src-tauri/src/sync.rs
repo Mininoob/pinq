@@ -1342,11 +1342,7 @@ fn run_joiner(app: &AppHandle, addr: &str, code: &str) -> Result<(), String> {
     let new_space_key = open_key(&shared, &sealed).map_err(|e| e.to_string())?;
 
     // Adopt the host's space: persist, refresh tag + fingerprint, re-advertise.
-    set_secret(app, "space-key", &new_space_key).map_err(|e| e.to_string())?;
-    *state.space_key.lock().unwrap() = new_space_key;
-    *state.current_tag.lock().unwrap() = lan_tag(&new_space_key);
-    *state.space_fingerprint.lock().unwrap() = space_fp(&new_space_key);
-    re_register(&state);
+    adopt_space_key(app, &state, new_space_key)?;
 
     // Take the host's registry along with the key (our own membership record
     // is in there, signed by the host). Records for our OLD space stay inert.
@@ -1486,6 +1482,55 @@ fn envelope_sig_msg(ops: &[SyncOp]) -> Result<Vec<u8>, String> {
 }
 
 /// Seal a payload for an untrusted carrier.
+/// Switch this device onto `new_key`: persist it, refresh the LAN tag and
+/// fingerprint, and re-advertise. Shared by pairing, rekey, and
+/// restore-from-phrase.
+fn adopt_space_key(app: &AppHandle, state: &SyncState, new_key: [u8; 32]) -> Result<(), String> {
+    set_secret(app, "space-key", &new_key).map_err(|e| e.to_string())?;
+    *state.space_key.lock().unwrap() = new_key;
+    *state.current_tag.lock().unwrap() = lan_tag(&new_key);
+    *state.space_fingerprint.lock().unwrap() = space_fp(&new_key);
+    re_register(state);
+    Ok(())
+}
+
+/// The space key as a 24-word recovery phrase (spec §21). Whoever holds the
+/// phrase holds the space — treat it like a password.
+#[tauri::command]
+pub fn recovery_phrase(state: State<'_, SyncState>) -> Result<String, String> {
+    let key = *state.space_key.lock().unwrap();
+    bip39::Mnemonic::from_entropy(&key)
+        .map(|m| m.to_string())
+        .map_err(|e| e.to_string())
+}
+
+/// Adopt the space encoded in a recovery phrase. Pair with any surviving
+/// device afterwards (or point at the same relay) and the notes come back.
+/// Returns the new space fingerprint for the UI to confirm.
+#[tauri::command]
+pub fn restore_from_phrase(
+    app: AppHandle,
+    state: State<'_, SyncState>,
+    store: State<'_, Arc<Store>>,
+    phrase: String,
+) -> Result<String, String> {
+    let normalized = phrase.trim().to_lowercase();
+    let m = bip39::Mnemonic::parse_normalized(&normalized)
+        .map_err(|_| "That doesn't read as a valid recovery phrase".to_string())?;
+    let entropy = m.to_entropy();
+    if entropy.len() != 32 {
+        return Err("A Pinq recovery phrase has 24 words".into());
+    }
+    let mut key = [0u8; 32];
+    key.copy_from_slice(&entropy);
+    adopt_space_key(&app, &state, key)?;
+    // Declare membership in the restored space so syncs are accepted.
+    let secret = *state.device_secret.lock().unwrap();
+    ensure_genesis(&store, &registry::space_tag(&key), &secret, &state.device_name);
+    state.sync_asap.store(true, std::sync::atomic::Ordering::Relaxed);
+    Ok(space_fp(&key))
+}
+
 pub fn seal_envelope(space_key: &[u8; 32], payload: &EnvelopePayload) -> Result<Vec<u8>, String> {
     use chacha20poly1305::{aead::Aead, ChaCha20Poly1305, KeyInit};
     let key = blake3::keyed_hash(space_key, b"pinq-envelope-v1");
@@ -2059,7 +2104,12 @@ fn send_ops(chan: &mut SecureChan, ops: &[SyncOp]) -> Result<(), String> {
 }
 
 /// Receive op batches until the end marker, applying each as it lands.
-fn recv_ops(chan: &mut SecureChan, store: &Store) -> Result<(Vec<String>, usize), String> {
+/// The sender's version vector enables concurrent-edit text merging.
+fn recv_ops(
+    chan: &mut SecureChan,
+    store: &Store,
+    their_vv: &HashMap<String, u64>,
+) -> Result<(Vec<String>, usize), String> {
     let mut applied = Vec::new();
     let mut pulled = 0usize;
     loop {
@@ -2070,7 +2120,7 @@ fn recv_ops(chan: &mut SecureChan, store: &Store) -> Result<(Vec<String>, usize)
                     serde_json::from_value(frame.get("ops").cloned().unwrap_or_default())
                         .map_err(|e| e.to_string())?;
                 pulled += ops.len();
-                applied.extend(store.apply_remote_ops(&ops).map_err(ioerr)?);
+                applied.extend(store.apply_remote_ops(&ops, Some(their_vv)).map_err(ioerr)?);
             }
             Some("ops_end") => break,
             other => return Err(format!("unexpected frame {other:?} during op exchange")),
@@ -2269,7 +2319,7 @@ pub fn sync_as_initiator(
         serde_json::from_value(their_vv_frame.get("vv").cloned().unwrap_or_default())
             .map_err(|e| e.to_string())?;
 
-    let (applied, pulled) = recv_ops(&mut chan, store)?;
+    let (applied, pulled) = recv_ops(&mut chan, store, &their_vv)?;
     let to_send = store.ops_missing_from(&their_vv).map_err(ioerr)?;
     let pushed = to_send.len();
     send_ops(&mut chan, &to_send)?;
@@ -2356,7 +2406,7 @@ pub fn sync_as_responder(
     let to_send = store.ops_missing_from(&their_vv).map_err(ioerr)?;
     let pushed = to_send.len();
     send_ops(&mut chan, &to_send)?;
-    let (applied, pulled) = recv_ops(&mut chan, store)?;
+    let (applied, pulled) = recv_ops(&mut chan, store, &their_vv)?;
 
     let their_req = chan.recv().map_err(ioerr)?;
     let their_wants: Vec<String> =
@@ -2853,7 +2903,8 @@ pub fn relay_exchange(
                 let e = pushed_vv.entry(op.device.clone()).or_insert(0);
                 *e = (*e).max(op.ctr);
             }
-            applied.extend(store.apply_remote_ops(&payload.ops).map_err(ioerr)?);
+            // Relay envelopes carry no sender vv — plain last-write-wins.
+            applied.extend(store.apply_remote_ops(&payload.ops, None).map_err(ioerr)?);
         }
         store.meta_set(&cursor_key, &cursor.to_string()).map_err(ioerr)?;
         if resp.get("more").and_then(|m| m.as_bool()) != Some(true) {
