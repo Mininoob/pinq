@@ -131,6 +131,11 @@ pub enum Action {
     /// Reminder set (Some = when to fire, in ms epoch) or cleared (None).
     /// Firing commits a clear, so replicas that sync it never re-fire.
     ReminderSet { id: NoteId, at_ms: u64, remind_ms: Option<u64> },
+    /// Task due date (ms epoch) set or cleared. Independent of the reminder:
+    /// due is what the note IS about, remind is when it comes find you.
+    DueSet { id: NoteId, at_ms: u64, due_ms: Option<u64> },
+    /// Task status ("todo" | "doing" | "done") set or cleared (None = not a task).
+    StatusSet { id: NoteId, at_ms: u64, status: Option<String> },
 }
 
 impl Action {
@@ -156,7 +161,9 @@ impl Action {
             | Action::NoteTrashed { id, .. }
             | Action::NoteRestored { id, .. }
             | Action::NoteDeleted { id, .. }
-            | Action::ReminderSet { id, .. } => id,
+            | Action::ReminderSet { id, .. }
+            | Action::DueSet { id, .. }
+            | Action::StatusSet { id, .. } => id,
         }
     }
 }
@@ -181,6 +188,12 @@ pub struct NoteState {
     /// When to bring this note back (ms epoch); cleared once it fires.
     #[serde(default)]
     pub remind_ms: Option<u64>,
+    /// Task due date (ms epoch), if this note is a task with one.
+    #[serde(default)]
+    pub due_ms: Option<u64>,
+    /// Task status ("todo" | "doing" | "done"); None = not a task.
+    #[serde(default)]
+    pub status: Option<String>,
     #[serde(default)]
     pub tags: Vec<String>,
     /// Derived from `items`; kept for search, previews, history, and export.
@@ -218,6 +231,8 @@ pub fn apply(notes: &mut HashMap<NoteId, NoteState>, action: Action) {
                         trashed: false,
                         tucked: None,
                         remind_ms: None,
+                        due_ms: None,
+                        status: None,
                         color: None,
                         paper: None,
                         tags: Vec::new(),
@@ -299,6 +314,18 @@ pub fn apply(notes: &mut HashMap<NoteId, NoteState>, action: Action) {
             Action::ReminderSet { id, at_ms, remind_ms } => {
                 if let Some(n) = notes.get_mut(&id) {
                     n.remind_ms = remind_ms;
+                    n.modified_ms = at_ms;
+                }
+            }
+            Action::DueSet { id, at_ms, due_ms } => {
+                if let Some(n) = notes.get_mut(&id) {
+                    n.due_ms = due_ms;
+                    n.modified_ms = at_ms;
+                }
+            }
+            Action::StatusSet { id, at_ms, status } => {
+                if let Some(n) = notes.get_mut(&id) {
+                    n.status = status;
                     n.modified_ms = at_ms;
                 }
             }
@@ -596,6 +623,28 @@ mod tests {
             Action::ReminderSet { id: id.clone(), at_ms: 5, remind_ms: None },
         ]);
         assert_eq!(notes[&id].remind_ms, None);
+    }
+
+    #[test]
+    fn due_and_status_roundtrip() {
+        let id = new_note_id();
+        let notes = replay([
+            Action::NoteCreated { id: id.clone(), at_ms: 1, rect: rect(0, 0) },
+            Action::DueSet { id: id.clone(), at_ms: 2, due_ms: Some(9000) },
+            Action::StatusSet { id: id.clone(), at_ms: 3, status: Some("doing".into()) },
+        ]);
+        assert_eq!(notes[&id].due_ms, Some(9000));
+        assert_eq!(notes[&id].status.as_deref(), Some("doing"));
+        // Clearing both returns the note to "not a task".
+        let notes = replay([
+            Action::NoteCreated { id: id.clone(), at_ms: 1, rect: rect(0, 0) },
+            Action::DueSet { id: id.clone(), at_ms: 2, due_ms: Some(9000) },
+            Action::StatusSet { id: id.clone(), at_ms: 3, status: Some("doing".into()) },
+            Action::DueSet { id: id.clone(), at_ms: 4, due_ms: None },
+            Action::StatusSet { id: id.clone(), at_ms: 5, status: None },
+        ]);
+        assert_eq!(notes[&id].due_ms, None);
+        assert_eq!(notes[&id].status, None);
     }
 
     #[test]

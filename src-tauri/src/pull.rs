@@ -200,20 +200,21 @@ pub async fn pull_end(
     Ok(Some(note.id))
 }
 
-/// Accessibility path (spec §9): a plain click on the pad creates a note just
-/// inward of the pad, aligned with the cursor. Async: creates a window.
-#[tauri::command]
-pub async fn click_create_note(
-    window: tauri::WebviewWindow,
-    app: AppHandle,
-    store: State<'_, Arc<Store>>,
+/// Create (and open) a note just inward of the pad, aligned with the cursor,
+/// optionally seeded with template text boxes. Shared by click-to-create and
+/// the pad card's template rows.
+fn create_note_near_pad(
+    window: &tauri::WebviewWindow,
+    app: &AppHandle,
+    store: &Arc<Store>,
+    seeds: &[&str],
 ) -> Result<String, String> {
     let monitor = window.current_monitor().ok().flatten();
     let (wa, scale) = match &monitor {
         Some(m) => (crate::monitors::work_area_of(m), m.scale_factor()),
         None => (
-            crate::monitors::primary_work_area(&app),
-            crate::monitors::primary_scale(&app),
+            crate::monitors::primary_work_area(app),
+            crate::monitors::primary_scale(app),
         ),
     };
     let edge = app.state::<crate::settings::SettingsStore>().current().pad_edge;
@@ -232,8 +233,48 @@ pub async fn click_create_note(
     };
     let rect = crate::notes::clamp_to_area(Rect { x, y, w, h }, wa);
     let note = store.create_note(rect).map_err(|e| e.to_string())?;
-    crate::notes::open_note_window(&app, &note).map_err(|e| e.to_string())?;
+    let mut sy = 8.0;
+    for seed in seeds {
+        let item = pinq_core::CanvasItem::text_item(8.0, sy, 160.0, seed.to_string());
+        sy += 20.0 * (seed.lines().count().max(1) as f64) + 12.0;
+        store.add_item(&note.id, item).map_err(|e| e.to_string())?;
+    }
+    crate::notes::open_note_window(app, store.get(&note.id).as_ref().unwrap_or(&note))
+        .map_err(|e| e.to_string())?;
     Ok(note.id)
+}
+
+/// Accessibility path (spec §9): a plain click on the pad creates a note just
+/// inward of the pad, aligned with the cursor. Async: creates a window.
+#[tauri::command]
+pub async fn click_create_note(
+    window: tauri::WebviewWindow,
+    app: AppHandle,
+    store: State<'_, Arc<Store>>,
+) -> Result<String, String> {
+    create_note_near_pad(&window, &app, &store, &[])
+}
+
+/// Quick capture from the pad card (spec S7/S9): a note pre-seeded with a
+/// built-in template's text boxes, caret-ready.
+#[tauri::command]
+pub async fn create_note_from_template(
+    window: tauri::WebviewWindow,
+    app: AppHandle,
+    store: State<'_, Arc<Store>>,
+    kind: String,
+) -> Result<String, String> {
+    let seeds: &[&str] = match kind.as_str() {
+        "todo" => &["Todo", "\u{2610} "],
+        "meeting" => &["Meeting \u{2014} ", "Attendees: ", "Notes\n\u{2022} ", "Actions\n\u{2610} "],
+        _ => &[],
+    };
+    let id = create_note_near_pad(&window, &app, &store, seeds)?;
+    if kind == "todo" {
+        let _ = store.set_status(&id, Some("todo".into()));
+    }
+    crate::sync::note_edited(&app, &id);
+    Ok(id)
 }
 
 #[tauri::command]

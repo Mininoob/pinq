@@ -400,7 +400,126 @@ body[data-mode="dark"] {
   background: var(--note-ink);
 }
 
-/* Open on another device — syncing live. */
+/* ---------- Task fields ---------- */
+
+/* Header status button: cycles none → todo → doing → done. */
+.note-status-btn {
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  font-size: 12px;
+  line-height: 1;
+  padding: 2px 4px;
+  color: var(--note-text);
+  opacity: 0.35;
+}
+.note-status-btn.st-todo,
+.note-status-btn.st-doing {
+  opacity: 0.9;
+}
+.note-status-btn.st-doing {
+  color: var(--pad-a);
+}
+.note-status-btn.st-done {
+  opacity: 0.9;
+  color: #34a860;
+}
+.note-status-btn:hover {
+  opacity: 1;
+}
+
+/* Done notes read as finished without hiding anything. */
+.note.note-done .note-canvas {
+  filter: saturate(0.75);
+  opacity: 0.88;
+}
+
+/* Due + checklist strip under the header. */
+.note-task-row {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 3px 8px;
+  background: var(--note-header);
+  font-size: 11px;
+  color: var(--note-text);
+}
+.note-due-chip {
+  border: none;
+  border-radius: 999px;
+  padding: 2px 8px;
+  background: rgba(0, 0, 0, 0.06);
+  color: inherit;
+  font-size: 11px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.note-due-chip.overdue {
+  background: rgba(217, 72, 69, 0.16);
+  color: #c43a37;
+  font-weight: 600;
+}
+.note-checklist {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  opacity: 0.85;
+  white-space: nowrap;
+}
+.note-checklist-bar {
+  width: 64px;
+  height: 5px;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.1);
+  overflow: hidden;
+}
+.note-checklist-fill {
+  display: block;
+  height: 100%;
+  border-radius: 999px;
+  background: var(--pad-a);
+  transition: width 160ms ease-out;
+}
+
+/* Due section inside the reminder popover. */
+.note-due-section {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 6px;
+  padding-top: 6px;
+  border-top: 1px solid var(--note-border);
+}
+.note-due-label {
+  font-size: 11px;
+  font-weight: 600;
+  opacity: 0.7;
+}
+
+/* Library card badges. */
+.card-status.st-done {
+  color: #34a860;
+}
+.card-due.overdue {
+  color: #c43a37;
+  font-weight: 600;
+}
+
+/* Divider + glyph rows in the pad card (quick-capture templates). */
+.pad-card-rule {
+  height: 1px;
+  margin: 3px 6px;
+  background: var(--note-border);
+}
+.pad-card-glyph {
+  width: 14px;
+  text-align: center;
+  font-size: 12px;
+  opacity: 0.75;
+}
+
 .note-trash {
   position: absolute;
   left: 4px;

@@ -21,6 +21,8 @@ interface NoteState {
   color: string | null;
   paper: string | null;
   remind_ms: number | null;
+  due_ms: number | null;
+  status: string | null;
   tags: string[];
   attachments: Array<{ hash: string; name: string; mime: string; size: number }>;
   created_ms: number;
@@ -29,7 +31,7 @@ interface NoteState {
 
 const firstImage = (n: NoteState) => n.attachments.find((a) => a.mime.startsWith("image/"));
 
-type SortBy = "modified" | "created" | "title";
+type SortBy = "modified" | "created" | "title" | "due";
 type GroupBy = "none" | "color" | "tag";
 
 // Per-device view preferences; pure display state, so localStorage not settings.
@@ -60,7 +62,7 @@ export default function Library() {
   // Smart tag suggestions ([] while the feature is off — card simply hides).
   const [suggestions, setSuggestions] = createSignal<TagSuggestion[]>([]);
   const [sortBy, setSortBy] = createSignal<SortBy>(
-    viewPref("pinq.lib.sort", "modified", ["modified", "created", "title"]),
+    viewPref("pinq.lib.sort", "modified", ["modified", "created", "title", "due"]),
   );
   const [groupBy, setGroupBy] = createSignal<GroupBy>(
     viewPref("pinq.lib.group", "none", ["none", "color", "tag"]),
@@ -201,6 +203,16 @@ export default function Library() {
     switch (sortBy()) {
       case "created":
         return list.sort((a, b) => b.created_ms - a.created_ms);
+      case "due":
+        // Soonest due first; dateless notes sink to the end (by recency there).
+        return list.sort((a, b) => {
+          if (a.due_ms === null || b.due_ms === null) {
+            if (a.due_ms !== null) return -1;
+            if (b.due_ms !== null) return 1;
+            return b.modified_ms - a.modified_ms;
+          }
+          return a.due_ms - b.due_ms;
+        });
       case "title":
         // Untitled notes sink to the end.
         return list.sort((a, b) => {
@@ -359,6 +371,7 @@ export default function Library() {
             <option value="modified">Recent</option>
             <option value="created">Created</option>
             <option value="title">Title</option>
+            <option value="due">Due</option>
           </select>
           <select
             class="library-select"
@@ -530,6 +543,27 @@ export default function Library() {
                     <span>
                       {n.pinned ? "📌" : ""}
                       {n.attachments.length > 0 ? ` 📎${n.attachments.length}` : ""}
+                      <Show when={n.status}>
+                        {(s) => (
+                          <span class={`card-status st-${s()}`} title={`Status: ${s()}`}>
+                            {" "}
+                            {s() === "done" ? "✓" : s() === "doing" ? "◐" : "○"}
+                          </span>
+                        )}
+                      </Show>
+                      <Show when={n.due_ms}>
+                        {(ms) => (
+                          <span
+                            class="card-due"
+                            classList={{ overdue: ms() < Date.now() && n.status !== "done" }}
+                            title={`Due: ${new Date(ms()).toLocaleString()}`}
+                          >
+                            {" "}
+                            📅
+                            {new Date(ms()).toLocaleDateString([], { month: "short", day: "numeric" })}
+                          </span>
+                        )}
+                      </Show>
                       <Show when={n.remind_ms}>
                         {(ms) => (
                           <span title={`Reminder: ${new Date(ms()).toLocaleString()}`}> ⏰</span>

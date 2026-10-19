@@ -23,6 +23,8 @@ interface NoteState {
   paper: string | null;
   tucked: string | null;
   remind_ms: number | null;
+  due_ms: number | null;
+  status: string | null;
   tags: string[];
   items: CanvasItem[];
 }
@@ -184,6 +186,8 @@ export default function Note(props: { id: string }) {
   const [showHistory, setShowHistory] = createSignal(false);
   const [showRemind, setShowRemind] = createSignal(false);
   const [remind, setRemind] = createSignal<number | null>(null);
+  const [due, setDue] = createSignal<number | null>(null);
+  const [status, setStatus] = createSignal<string | null>(null);
   const [history, setHistory] = createSignal<HistoryEntry[]>([]);
   const [tucked, setTucked] = createSignal<string | null>(null);
   // True while another device has this note open — sync goes near-realtime.
@@ -534,6 +538,8 @@ export default function Note(props: { id: string }) {
       setPaper(note.paper);
       setTucked(note.tucked);
       setRemind(note.remind_ms ?? null);
+      setDue(note.due_ms ?? null);
+      setStatus(note.status ?? null);
       setLocalTheme(note.color ?? undefined);
       setLocalNotePaper(note.paper ?? undefined);
     }
@@ -564,6 +570,8 @@ export default function Note(props: { id: string }) {
       setPaper(note.paper);
       setTucked(note.tucked);
       setRemind(note.remind_ms ?? null);
+      setDue(note.due_ms ?? null);
+      setStatus(note.status ?? null);
       setLocalTheme(note.color ?? undefined);
       setLocalNotePaper(note.paper ?? undefined);
       for (const i of note.items) sentW.set(i.item_id, i.w);
@@ -1078,6 +1086,57 @@ export default function Note(props: { id: string }) {
     void invoke("set_reminder", { id: props.id, remindMs: ms });
   };
 
+  // ----- task fields: due date, status, checklist rollup -----
+
+  const applyDue = (ms: number | null) => {
+    setDue(ms);
+    void invoke("set_note_due", { id: props.id, dueMs: ms });
+  };
+
+  // Click cycles none → todo → doing → done → none.
+  const STATUS_CYCLE: Array<string | null> = [null, "todo", "doing", "done"];
+  const cycleStatus = () => {
+    const next =
+      STATUS_CYCLE[(STATUS_CYCLE.indexOf(status()) + 1) % STATUS_CYCLE.length];
+    setStatus(next);
+    void invoke("set_note_status", { id: props.id, status: next });
+  };
+  const statusGlyph = () =>
+    status() === "todo" ? "○" : status() === "doing" ? "◐" : status() === "done" ? "✓" : "○";
+
+  // Checklist rollup, derived from the ☐/☑ glyphs already used in text.
+  const checklist = createMemo(() => {
+    let done = 0;
+    let total = 0;
+    for (const i of items()) {
+      if (i.type !== "text") continue;
+      for (const ch of i.text) {
+        if (ch === BOX) total += 1;
+        else if (ch === CHECKED) {
+          total += 1;
+          done += 1;
+        }
+      }
+    }
+    return { done, total };
+  });
+
+  const dueLabel = () => {
+    const ms = due();
+    if (!ms) return "";
+    const d = new Date(ms);
+    const sameYear = d.getFullYear() === new Date().getFullYear();
+    return d.toLocaleDateString([], {
+      month: "short",
+      day: "numeric",
+      ...(sameYear ? {} : { year: "numeric" }),
+    });
+  };
+  const overdue = () => {
+    const ms = due();
+    return ms !== null && ms < Date.now() && status() !== "done";
+  };
+
   const remindPresets = (): Array<{ label: string; ms: number }> => {
     const now = new Date();
     const inOneHour = now.getTime() + 3600_000;
@@ -1301,7 +1360,12 @@ export default function Note(props: { id: string }) {
   return (
     <div
       class="note"
-      classList={{ "note-tucked": !!tucked(), "ctrl-down": ctrlHeld(), "drop-hover": dropHover() }}
+      classList={{
+        "note-tucked": !!tucked(),
+        "ctrl-down": ctrlHeld(),
+        "drop-hover": dropHover(),
+        "note-done": status() === "done",
+      }}
       onKeyDown={onKeyDown}
       onPaste={onPaste}
     >
@@ -1341,9 +1405,21 @@ export default function Note(props: { id: string }) {
           <span /><span /><span />
         </div>
         <button
+          class="note-status-btn"
+          classList={{ [`st-${status() ?? "none"}`]: true }}
+          title={
+            status()
+              ? `Status: ${status()} — click to change`
+              : "Make this a task (todo → doing → done)"
+          }
+          onClick={cycleStatus}
+        >
+          {statusGlyph()}
+        </button>
+        <button
           class="note-remind-btn"
-          classList={{ armed: remind() !== null }}
-          title={remind() ? `Reminder set for ${remindLabel()}` : "Remind me…"}
+          classList={{ armed: remind() !== null || due() !== null }}
+          title={remind() ? `Reminder set for ${remindLabel()}` : "Remind me / due date…"}
           onClick={() => {
             setShowRemind(!showRemind());
             setShowPalette(false);
@@ -1371,6 +1447,34 @@ export default function Note(props: { id: string }) {
           ⤵
         </button>
       </header>
+      <Show when={due() !== null || checklist().total > 0}>
+        <div class="note-task-row">
+          <Show when={due() !== null}>
+            <button
+              class="note-due-chip"
+              classList={{ overdue: overdue() }}
+              title="Due date — click to change"
+              onClick={() => setShowRemind(true)}
+            >
+              📅 {dueLabel()}
+            </button>
+          </Show>
+          <Show when={checklist().total > 0}>
+            <span
+              class="note-checklist"
+              title={`${checklist().done} of ${checklist().total} checked`}
+            >
+              <span class="note-checklist-bar">
+                <span
+                  class="note-checklist-fill"
+                  style={{ width: `${(checklist().done / checklist().total) * 100}%` }}
+                />
+              </span>
+              {checklist().done}/{checklist().total}
+            </span>
+          </Show>
+        </div>
+      </Show>
       <Show when={tags().length > 0 || suggest().tags.length > 0 || suggest().title}>
         <div class="note-tags">
           <For each={tags()}>
@@ -1503,6 +1607,32 @@ export default function Note(props: { id: string }) {
                 if (!Number.isNaN(ms) && ms > Date.now()) applyReminder(ms);
               }}
             />
+          </div>
+          <div class="note-due-section">
+            <span class="note-due-label">Due</span>
+            <input
+              class="note-remind-input"
+              type="datetime-local"
+              value={due() ? toLocalInput(due()!) : ""}
+              onChange={(e) => {
+                const v = e.currentTarget.value;
+                if (!v) return applyDue(null);
+                const ms = new Date(v).getTime();
+                if (!Number.isNaN(ms)) applyDue(ms);
+              }}
+            />
+            <Show when={due()}>
+              <button
+                class="note-remind-option"
+                title="Set the reminder to the due time"
+                onClick={() => applyReminder(due())}
+              >
+                🔔 Remind me then
+              </button>
+              <button class="note-remind-clear" onClick={() => applyDue(null)}>
+                Clear
+              </button>
+            </Show>
           </div>
         </div>
       </Show>

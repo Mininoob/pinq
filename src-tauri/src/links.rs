@@ -276,6 +276,8 @@ mod tests {
             paper: None,
             tucked: None,
             remind_ms: None,
+            due_ms: None,
+            status: None,
             tags: Vec::new(),
             attachments: Vec::new(),
             items: Vec::new(),

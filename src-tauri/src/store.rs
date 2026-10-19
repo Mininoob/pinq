@@ -105,6 +105,8 @@ CREATE TABLE IF NOT EXISTS notes (
     trashed     INTEGER NOT NULL DEFAULT 0,
     tucked      TEXT,
     remind_ms   INTEGER,
+    due_ms      INTEGER,
+    status      TEXT,
     color       TEXT,
     paper       TEXT,
     tags        TEXT NOT NULL DEFAULT '[]',
@@ -345,6 +347,12 @@ impl Store {
         if ver < 6 {
             let _ = conn.execute("ALTER TABLE notes ADD COLUMN remind_ms INTEGER", []);
             conn.pragma_update(None, "user_version", 6).map_err(db_err)?;
+        }
+        // v7: task fields (fresh DBs already have them via BASE_SCHEMA).
+        if ver < 7 {
+            let _ = conn.execute("ALTER TABLE notes ADD COLUMN due_ms INTEGER", []);
+            let _ = conn.execute("ALTER TABLE notes ADD COLUMN status TEXT", []);
+            conn.pragma_update(None, "user_version", 7).map_err(db_err)?;
         }
 
         // One-time import of the legacy JSONL log into a fresh op-log.
@@ -800,6 +808,30 @@ impl Store {
         self.commit(Action::ReminderSet { id: id.to_string(), at_ms: now_ms(), remind_ms })
     }
 
+    /// Set (Some) or clear (None) a task due date. Idempotent.
+    pub fn set_due(&self, id: &str, due_ms: Option<u64>) -> io::Result<()> {
+        {
+            let notes = self.notes.lock().unwrap();
+            match notes.get(id) {
+                Some(n) if n.due_ms != due_ms => {}
+                _ => return Ok(()),
+            }
+        }
+        self.commit(Action::DueSet { id: id.to_string(), at_ms: now_ms(), due_ms })
+    }
+
+    /// Set (Some) or clear (None) a task status. Idempotent.
+    pub fn set_status(&self, id: &str, status: Option<String>) -> io::Result<()> {
+        {
+            let notes = self.notes.lock().unwrap();
+            match notes.get(id) {
+                Some(n) if n.status != status => {}
+                _ => return Ok(()),
+            }
+        }
+        self.commit(Action::StatusSet { id: id.to_string(), at_ms: now_ms(), status })
+    }
+
     pub fn set_color(&self, id: &str, color: Option<String>) -> io::Result<()> {
         {
             let notes = self.notes.lock().unwrap();
@@ -1237,8 +1269,8 @@ fn write_note_row(
     match state {
         Some(n) => tx.execute(
             "INSERT OR REPLACE INTO notes
-             (id, x, y, w, h, text, pinned, trashed, tucked, remind_ms, color, paper, tags, attachments, items, created_ms, modified_ms)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17)",
+             (id, x, y, w, h, text, pinned, trashed, tucked, remind_ms, color, paper, tags, attachments, items, created_ms, modified_ms, due_ms, status)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19)",
             rusqlite::params![
                 n.id,
                 n.rect.x,
@@ -1256,7 +1288,9 @@ fn write_note_row(
                 serde_json::to_string(&n.attachments).unwrap_or_else(|_| "[]".into()),
                 serde_json::to_string(&n.items).unwrap_or_else(|_| "[]".into()),
                 n.created_ms as i64,
-                n.modified_ms as i64
+                n.modified_ms as i64,
+                n.due_ms.map(|v| v as i64),
+                n.status
             ],
         ),
         None => tx.execute("DELETE FROM notes WHERE id=?1", rusqlite::params![id]),
@@ -1291,7 +1325,9 @@ fn log_and_project(tx: &rusqlite::Transaction, device: &str, action: &Action) ->
         | Action::NoteTrashed { at_ms, .. }
         | Action::NoteRestored { at_ms, .. }
         | Action::NoteDeleted { at_ms, .. }
-        | Action::ReminderSet { at_ms, .. } => *at_ms as i64,
+        | Action::ReminderSet { at_ms, .. }
+        | Action::DueSet { at_ms, .. }
+        | Action::StatusSet { at_ms, .. } => *at_ms as i64,
     };
     let ctr: i64 = tx
         .query_row(
@@ -1364,6 +1400,14 @@ fn log_and_project(tx: &rusqlite::Transaction, device: &str, action: &Action) ->
         Action::ReminderSet { id, at_ms, remind_ms } => tx.execute(
             "UPDATE notes SET remind_ms=?2, modified_ms=?3 WHERE id=?1",
             rusqlite::params![id, remind_ms.map(|v| v as i64), *at_ms as i64],
+        ),
+        Action::DueSet { id, at_ms, due_ms } => tx.execute(
+            "UPDATE notes SET due_ms=?2, modified_ms=?3 WHERE id=?1",
+            rusqlite::params![id, due_ms.map(|v| v as i64), *at_ms as i64],
+        ),
+        Action::StatusSet { id, at_ms, status } => tx.execute(
+            "UPDATE notes SET status=?2, modified_ms=?3 WHERE id=?1",
+            rusqlite::params![id, status, *at_ms as i64],
         ),
         Action::NotePaperChanged { id, at_ms, paper } => tx.execute(
             "UPDATE notes SET paper=?2, modified_ms=?3 WHERE id=?1",
@@ -1465,7 +1509,7 @@ fn log_and_project(tx: &rusqlite::Transaction, device: &str, action: &Action) ->
 
 fn load_projection(conn: &Connection) -> io::Result<HashMap<NoteId, NoteState>> {
     let mut stmt = conn
-        .prepare("SELECT id, x, y, w, h, text, pinned, trashed, tucked, remind_ms, color, paper, tags, attachments, items, created_ms, modified_ms FROM notes")
+        .prepare("SELECT id, x, y, w, h, text, pinned, trashed, tucked, remind_ms, color, paper, tags, attachments, items, created_ms, modified_ms, due_ms, status FROM notes")
         .map_err(db_err)?;
     let rows = stmt
         .query_map([], |r| {
@@ -1484,6 +1528,8 @@ fn load_projection(conn: &Connection) -> io::Result<HashMap<NoteId, NoteState>> 
                 items: serde_json::from_str(&r.get::<_, String>(14)?).unwrap_or_default(),
                 created_ms: r.get::<_, i64>(15)? as u64,
                 modified_ms: r.get::<_, i64>(16)? as u64,
+                due_ms: r.get::<_, Option<i64>>(17)?.map(|v| v as u64),
+                status: r.get(18)?,
             })
         })
         .map_err(db_err)?;
@@ -1695,6 +1741,33 @@ mod tests {
     fn sync_a_to_b(a: &Store, b: &Store) -> Vec<String> {
         let ops = a.ops_missing_from(&b.version_vector().unwrap()).unwrap();
         b.apply_remote_ops(&ops).unwrap()
+    }
+
+    /// Due date and status are content: they sync, persist across reopen,
+    /// and clear back to "not a task".
+    #[test]
+    fn task_fields_sync_and_persist() {
+        let (da, db_) = (temp_dir(), temp_dir());
+        let id = {
+            let a = Store::open(&da).unwrap();
+            let b = Store::open(&db_).unwrap();
+            let note = a.create_note(rect()).unwrap();
+            a.set_due(&note.id, Some(777_000)).unwrap();
+            a.set_status(&note.id, Some("doing".into())).unwrap();
+            sync_a_to_b(&a, &b);
+            let on_b = b.get(&note.id).unwrap();
+            assert_eq!(on_b.due_ms, Some(777_000));
+            assert_eq!(on_b.status.as_deref(), Some("doing"));
+            note.id
+        };
+        let a = Store::open(&da).unwrap();
+        let n = a.get(&id).unwrap();
+        assert_eq!(n.due_ms, Some(777_000), "due survives reopen");
+        assert_eq!(n.status.as_deref(), Some("doing"));
+        a.set_status(&id, None).unwrap();
+        assert_eq!(a.get(&id).unwrap().status, None);
+        std::fs::remove_dir_all(da).ok();
+        std::fs::remove_dir_all(db_).ok();
     }
 
     #[test]

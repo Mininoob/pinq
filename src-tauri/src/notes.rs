@@ -457,6 +457,37 @@ pub fn set_reminder(
     store.set_reminder(&id, remind_ms).map_err(|e| e.to_string())
 }
 
+/// Set (ms epoch) or clear (null) a task due date.
+#[tauri::command]
+pub fn set_note_due(
+    app: AppHandle,
+    store: State<'_, Arc<Store>>,
+    id: String,
+    due_ms: Option<u64>,
+) -> Result<(), String> {
+    store.set_due(&id, due_ms).map_err(|e| e.to_string())?;
+    crate::sync::note_edited(&app, &id);
+    Ok(())
+}
+
+/// Set ("todo" | "doing" | "done") or clear (null) a task status.
+#[tauri::command]
+pub fn set_note_status(
+    app: AppHandle,
+    store: State<'_, Arc<Store>>,
+    id: String,
+    status: Option<String>,
+) -> Result<(), String> {
+    if let Some(s) = &status {
+        if !matches!(s.as_str(), "todo" | "doing" | "done") {
+            return Err(format!("unknown status {s:?}"));
+        }
+    }
+    store.set_status(&id, status).map_err(|e| e.to_string())?;
+    crate::sync::note_edited(&app, &id);
+    Ok(())
+}
+
 #[tauri::command]
 pub fn tag_note(store: State<'_, Arc<Store>>, id: String, tag: String) -> Result<(), String> {
     store.add_tag(&id, &tag).map_err(|e| e.to_string())

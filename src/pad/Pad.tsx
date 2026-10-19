@@ -108,6 +108,12 @@ export default function Pad(props: { edge: PadEdge }) {
     await invoke(action);
   };
 
+  // Quick capture (spec S7/S9): a template note appears beside the pad.
+  const pickTemplate = async (kind: string) => {
+    closeMenu();
+    await invoke("create_note_from_template", { kind });
+  };
+
   const onPointerEnter = () => {
     clearTimeout(collapseTimer);
     clearTimeout(menuLeaveTimer);
@@ -224,6 +230,15 @@ export default function Pad(props: { edge: PadEdge }) {
               </button>
             )}
           </For>
+          <div class="pad-card-rule" />
+          <button class="pad-card-btn" onClick={() => void pickTemplate("todo")}>
+            <span class="pad-card-glyph">☐</span>
+            <span>New todo</span>
+          </button>
+          <button class="pad-card-btn" onClick={() => void pickTemplate("meeting")}>
+            <span class="pad-card-glyph">✎</span>
+            <span>New meeting</span>
+          </button>
         </div>
       </Show>
     </div>
