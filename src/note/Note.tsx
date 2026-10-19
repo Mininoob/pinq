@@ -468,12 +468,20 @@ export default function Note(props: { id: string }) {
   // Per-item debounced text commits.
   const timers = new Map<string, number>();
   const pendingText = new Map<string, string>();
+  // Width last persisted to the store per item — content-fitted widths ride
+  // along with text commits so sync reloads never restore a stale width.
+  const sentW = new Map<string, number>();
 
   const commitItem = async (itemId: string) => {
     const text = pendingText.get(itemId);
     if (text === undefined) return;
     pendingText.delete(itemId);
     await invoke("set_item_text", { id: props.id, itemId, text });
+    const item = items().find((i) => i.item_id === itemId);
+    if (item && Math.abs((sentW.get(itemId) ?? -1) - item.w) > 1) {
+      sentW.set(itemId, item.w);
+      await invoke("move_item", { id: props.id, itemId, x: item.x, y: item.y, w: item.w });
+    }
   };
 
   const scheduleCommit = (itemId: string, text: string) => {
@@ -502,14 +510,16 @@ export default function Note(props: { id: string }) {
   };
 
   const newTextItemAt = async (x: number, y: number) => {
-    const w = Math.max(120, Math.min(220, canvas.clientWidth - x - 16));
+    // Starting width is just the empty-box placeholder floor; the fit pass
+    // takes over on mount and tracks content from the first keystroke.
     const item = await invoke<CanvasItem>("add_text_item", {
       id: props.id,
       x,
       y,
-      w,
+      w: 160,
       text: "",
     });
+    sentW.set(item.item_id, item.w);
     focusNext = item.item_id;
     setItems([...items(), item]);
   };
@@ -517,6 +527,7 @@ export default function Note(props: { id: string }) {
   onMount(async () => {
     const note = await invoke<NoteState | null>("get_note", { id: props.id });
     if (note) {
+      for (const i of note.items) sentW.set(i.item_id, i.w);
       setItems(note.items);
       setTags(note.tags);
       setColor(note.color);
@@ -555,6 +566,7 @@ export default function Note(props: { id: string }) {
       setRemind(note.remind_ms ?? null);
       setLocalTheme(note.color ?? undefined);
       setLocalNotePaper(note.paper ?? undefined);
+      for (const i of note.items) sentW.set(i.item_id, i.w);
       setItems(
         note.items.map((i) =>
           i.type === "text" && pendingText.has(i.item_id)
@@ -562,6 +574,15 @@ export default function Note(props: { id: string }) {
             : i,
         ),
       );
+      // <Index> rows keep their DOM (and never re-run regTextRef), so
+      // re-fit every text box to the freshly applied content.
+      queueMicrotask(() => {
+        for (const i of items()) {
+          if (i.type !== "text") continue;
+          const el = textRefs.get(i.item_id);
+          if (el && el.isConnected) fitTextItem(i, el);
+        }
+      });
     });
     void refreshBacklinks();
     void refreshRelated();
@@ -628,6 +649,7 @@ export default function Note(props: { id: string }) {
     unlistenSmart?.();
     unlistenLive?.();
     clearTimeout(undoChipTimer);
+    clearTimeout(growTimer);
   });
 
   // ----- text smarts (per item) -----
@@ -647,8 +669,9 @@ export default function Note(props: { id: string }) {
     el.style.height = `${el.scrollHeight}px`;
   };
 
-  // Text boxes hug their content: width follows the longest line (up to the
-  // canvas edge), so the drag bar is exactly as wide as the text.
+  // Text boxes hug their content: width follows the longest line, so the
+  // drag bar is exactly as wide as the text. Text never soft-wraps — lines
+  // break only at Enter, and the WINDOW grows to make room instead.
   let measurer: HTMLDivElement | undefined;
   const textWidth = (text: string) => {
     if (!measurer) {
@@ -662,12 +685,29 @@ export default function Note(props: { id: string }) {
     return measurer.getBoundingClientRect().width;
   };
 
+  // The window auto-widens (never shrinks) when a line outgrows it, clamped
+  // to the monitor's work area by the Rust side.
+  let growTimer: number | undefined;
+  const requestGrow = (extentCss: number) => {
+    const needed = extentCss + 24;
+    if (needed <= canvas.clientWidth || tucked()) return;
+    const target = Math.ceil(window.innerWidth + (needed - canvas.clientWidth));
+    clearTimeout(growTimer);
+    growTimer = window.setTimeout(
+      () => void invoke("grow_note_window", { id: props.id, widthCss: target }),
+      120,
+    );
+  };
+
   const fitTextItem = (item: CanvasItem, el: HTMLTextAreaElement) => {
-    const maxW = Math.max(80, canvas.clientWidth - item.x - 14);
     const min = el.value ? 60 : 160; // empty boxes stay wide enough for a placeholder
-    const w = Math.min(maxW, Math.max(min, Math.ceil(textWidth(el.value)) + 20));
+    const w = Math.max(min, Math.ceil(textWidth(el.value)) + 20);
     if (Math.abs(w - item.w) > 1) updateItem(item.item_id, { w });
+    // The box always fits its content, so the textarea never needs to pan;
+    // a stray scrollLeft would drift the glyphs off the mirror.
+    el.scrollLeft = 0;
     autosize(el);
+    requestGrow(item.x + w);
   };
 
   const extractCompletedTags = (
@@ -802,7 +842,10 @@ export default function Note(props: { id: string }) {
     }
   };
 
+  const textRefs = new Map<string, HTMLTextAreaElement>();
+
   const regTextRef = (el: HTMLTextAreaElement, item: CanvasItem) => {
+    textRefs.set(item.item_id, el);
     queueMicrotask(() => {
       fitTextItem(item, el);
       if (focusNext === item.item_id) {
@@ -1540,6 +1583,7 @@ export default function Note(props: { id: string }) {
                       value={(item() as Extract<CanvasItem, { type: "text" }>).text}
                       placeholder={item().item_id === seededId ? placeholder : ""}
                       rows={1}
+                      wrap="off"
                       spellcheck={true}
                       onInput={(e) => onItemInput(item(), e)}
                       onKeyDown={(e) => onItemKeyDown(item(), e)}

@@ -910,6 +910,8 @@ body[data-mode="dark"] {
   overflow: hidden;
   background: transparent;
   padding: 2px 4px;
+  /* Lines break only at Enter; the box (and window) grow instead of wrapping. */
+  white-space: pre;
   /* Fixed 20px line grid so ruled paper aligns with the text. */
   font: 14px/20px "Segoe UI", system-ui, sans-serif;
   /* Glyphs are drawn by the mirror overlay (so [[links]] can be styled);
@@ -928,8 +930,8 @@ body[data-mode="dark"] {
   padding: 2px 4px;
   font: 14px/20px "Segoe UI", system-ui, sans-serif;
   color: var(--note-text);
-  white-space: pre-wrap;
-  overflow-wrap: break-word;
+  /* Must match .item-text: no soft wrap, breaks only at explicit newlines. */
+  white-space: pre;
   overflow: hidden;
   pointer-events: none;
 }

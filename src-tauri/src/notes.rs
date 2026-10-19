@@ -315,6 +315,40 @@ pub fn restore_note(store: State<'_, Arc<Store>>, id: String) -> Result<(), Stri
     store.restore_note(&id).map_err(|e| e.to_string())
 }
 
+/// Widen a note window so a no-wrap text line stays visible. Grows only
+/// (shrinking is always the user's call), clamped to the monitor work area.
+/// Async: window sizing off the main thread. The resize flows through the
+/// normal move/resize pipeline, so the new size persists and syncs.
+#[tauri::command]
+pub async fn grow_note_window(
+    app: AppHandle,
+    store: State<'_, Arc<Store>>,
+    id: String,
+    width_css: f64,
+) -> Result<(), String> {
+    match store.get(&id) {
+        Some(n) if n.tucked.is_none() => {}
+        _ => return Ok(()), // tucked slivers and unknown notes never grow
+    }
+    let Some(win) = app.get_webview_window(&window_label(&id)) else { return Ok(()) };
+    let scale = win.scale_factor().map_err(|e| e.to_string())?;
+    let size = win.outer_size().map_err(|e| e.to_string())?;
+    let desired = (width_css * scale).round() as u32;
+    if desired <= size.width {
+        return Ok(());
+    }
+    let pos = win.outer_position().map_err(|e| e.to_string())?;
+    let (cx, cy) = (pos.x + size.width as i32 / 2, pos.y + size.height as i32 / 2);
+    let max_w = crate::monitors::work_area_containing(&app, cx, cy)
+        .map(|wa| (wa.x + wa.w as i32 - pos.x).max(0) as u32)
+        .unwrap_or(desired);
+    let new_w = desired.min(max_w);
+    if new_w > size.width {
+        win.set_size(PhysicalSize::new(new_w, size.height)).map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
 /// Create a text box on the note's canvas at (x, y).
 #[tauri::command]
 pub fn add_text_item(

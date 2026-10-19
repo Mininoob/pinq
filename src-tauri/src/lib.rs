@@ -106,6 +106,7 @@ pub fn run() {
             attachments::save_attachment,
             notes::peek_note,
             notes::untuck_note,
+            notes::grow_note_window,
             notes::add_text_item,
             notes::open_note,
             links::link_targets,
