@@ -338,6 +338,100 @@ body[data-mode="dark"] {
 @media (prefers-reduced-motion: reduce) {
   .pad { transition: none; }
   .pad-card { animation: none; }
+  .att-syncing { animation: none; }
+  .note-checklist-fill { transition: none; }
+  .pad-menu-btn,
+  .canvas-item,
+  .sticky-card {
+    transition: none !important;
+  }
+}
+
+/* ---------- First-run welcome tour ---------- */
+.onboard {
+  height: 100%;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 22px 26px;
+  background: var(--note-bg);
+  color: var(--note-text);
+  border-radius: 14px;
+  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.3);
+  font-family: "Segoe UI", system-ui, sans-serif;
+}
+.onboard-title {
+  margin: 0;
+  font-size: 20px;
+}
+.onboard-sub {
+  margin: 0 0 4px;
+  font-size: 12.5px;
+  opacity: 0.75;
+}
+.onboard-tips {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 11px;
+}
+.onboard-tip {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+}
+.onboard-glyph {
+  font-size: 17px;
+  width: 26px;
+  text-align: center;
+  flex: none;
+}
+.onboard-tip-title {
+  font-weight: 700;
+  font-size: 13px;
+}
+.onboard-tip-body {
+  font-size: 12px;
+  opacity: 0.8;
+  line-height: 1.45;
+}
+.onboard-go {
+  align-self: center;
+  border: none;
+  border-radius: 999px;
+  padding: 9px 22px;
+  background: linear-gradient(90deg, var(--pad-a), var(--pad-b));
+  color: #fff;
+  font-weight: 700;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+/* Shortcut editor rows (Settings → System). */
+.shortcut-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.shortcut-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12.5px;
+}
+.shortcut-row span {
+  width: 110px;
+  opacity: 0.8;
+}
+.shortcut-input {
+  flex: 1;
+  padding: 5px 8px;
+  border: 1px solid var(--lib-border);
+  border-radius: 6px;
+  background: transparent;
+  color: inherit;
+  font: 12px ui-monospace, Consolas, monospace;
 }
 
 .pad-grip {

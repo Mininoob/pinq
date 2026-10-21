@@ -6,6 +6,60 @@ use tauri::{AppHandle, Manager, PhysicalPosition, PhysicalSize, WebviewUrl, Webv
 pub const SETTINGS_LABEL: &str = "settings";
 pub const LIBRARY_LABEL: &str = "library";
 pub const FIND_LABEL: &str = "find";
+pub const ONBOARD_LABEL: &str = "onboarding";
+
+/// First-run welcome tour (spec S17): a centered card teaching the gestures.
+/// Also replayable from Settings.
+pub fn create_onboarding_window(app: &AppHandle) -> tauri::Result<()> {
+    if let Some(w) = app.get_webview_window(ONBOARD_LABEL) {
+        let _ = w.show();
+        let _ = w.set_focus();
+        return Ok(());
+    }
+    let wa = crate::monitors::primary_work_area(app);
+    let scale = crate::monitors::primary_scale(app);
+    let (w, h) = ((480.0 * scale).round() as u32, (460.0 * scale).round() as u32);
+    let win = WebviewWindowBuilder::new(
+        app,
+        ONBOARD_LABEL,
+        WebviewUrl::App("index.html?role=onboarding".into()),
+    )
+    .title("Welcome to Pinq")
+    .decorations(false)
+    .transparent(true)
+    .always_on_top(true)
+    .resizable(false)
+    .shadow(false)
+    .visible(false)
+    .build()?;
+    win.set_size(PhysicalSize::new(w, h))?;
+    win.set_position(PhysicalPosition::new(
+        wa.x + (wa.w as i32 - w as i32) / 2,
+        wa.y + (wa.h as i32 - h as i32) / 2,
+    ))?;
+    win.show()?;
+    let _ = win.set_focus();
+    Ok(())
+}
+
+/// Replay the tour from Settings. Async: window creation off the main thread.
+#[tauri::command]
+pub async fn show_onboarding(app: AppHandle) -> Result<(), String> {
+    create_onboarding_window(&app).map_err(|e| e.to_string())
+}
+
+/// "Got it" on the tour: remember and close. Async: window teardown.
+#[tauri::command]
+pub async fn onboarding_complete(
+    app: AppHandle,
+    settings: tauri::State<'_, crate::settings::SettingsStore>,
+) -> Result<(), String> {
+    settings.update(|s| s.onboarding_done = true);
+    if let Some(w) = app.get_webview_window(ONBOARD_LABEL) {
+        let _ = w.destroy();
+    }
+    Ok(())
+}
 
 const FIND_W: f64 = 560.0;
 const FIND_H: f64 = 420.0;

@@ -1,16 +1,50 @@
-# Manual-only: run from the Actions tab when you want cloud-built bundles.
-# (Local builds are the normal path — `npm run tauri build` on each OS.)
+# Three jobs:
+#   test    — every push/PR: cargo test (workspace) + tsc on Windows. Cheap,
+#             no bundling, no macOS minutes.
+#   bundle  — manual-only (Actions tab) when you want cloud-built bundles.
+#   release — on a v* tag: builds, SIGNS the updater artifacts, and publishes
+#             a GitHub release with latest.json (the in-app update feed).
+#             Needs repo secrets:
+#               TAURI_SIGNING_PRIVATE_KEY           (contents of ~/.tauri/pinq-updater.key)
+#               TAURI_SIGNING_PRIVATE_KEY_PASSWORD  (empty string for this key)
+#             The update feed URL only resolves while the repo/releases are
+#             public — flip visibility (or host latest.json elsewhere) when
+#             distributing beyond your own machines.
 #
 # macOS bundles are unsigned: first launch needs right-click → Open (or
-# `xattr -cr Pinq.app`). Code signing needs an Apple Developer cert wired
-# into APPLE_CERTIFICATE secrets — deliberately not set up yet.
+# `xattr -cr Pinq.app`). OS code signing needs an Apple Developer cert wired
+# into APPLE_CERTIFICATE secrets — deliberately not set up yet; same for a
+# Windows Authenticode cert (TAURI_WINDOWS_CERTIFICATE_* when acquired).
 name: build
 
 on:
   workflow_dispatch:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
 
 jobs:
+  test:
+    if: github.event_name == 'push' && !startsWith(github.ref, 'refs/tags/') || github.event_name == 'pull_request'
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+      - run: npm ci
+      - run: npx tsc --noEmit
+      - run: cargo test --workspace
+        working-directory: src-tauri
+
   bundle:
+    if: github.event_name == 'workflow_dispatch'
     strategy:
       fail-fast: false
       matrix:
@@ -43,3 +77,41 @@ jobs:
             src-tauri/target/${{ matrix.target }}/release/bundle/msi/*.msi
             src-tauri/target/${{ matrix.target }}/release/bundle/nsis/*.exe
           if-no-files-found: warn
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    permissions:
+      contents: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-14
+            target: aarch64-apple-darwin
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+      - run: npm ci
+      - uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        with:
+          tagName: ${{ github.ref_name }}
+          releaseName: "Pinq ${{ github.ref_name }}"
+          releaseBody: "See the commit log for what changed."
+          releaseDraft: true
+          args: --target ${{ matrix.target }}

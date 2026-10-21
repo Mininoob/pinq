@@ -10,6 +10,7 @@ import Settings from "./panels/Settings";
 import Library from "./panels/Library";
 import Find from "./panels/Find";
 import Viewer from "./panels/Viewer";
+import Onboarding from "./panels/Onboarding";
 
 // Every Pinq window loads this same app; the window's role travels in the URL.
 const params = new URLSearchParams(window.location.search);
@@ -33,6 +34,8 @@ function App() {
       return <Find />;
     case "viewer":
       return <Viewer noteId={params.get("note") ?? ""} hash={params.get("hash") ?? ""} />;
+    case "onboarding":
+      return <Onboarding />;
     default: {
       const edge = params.get("edge");
       return (

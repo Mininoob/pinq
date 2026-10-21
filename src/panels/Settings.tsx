@@ -123,6 +123,10 @@ export default function Settings() {
     smartSuggestions: false,
     launchAtLogin: false,
     showIn: "both",
+    shortcutHide: "ctrl+alt+h",
+    shortcutFind: "ctrl+alt+f",
+    shortcutNew: "ctrl+alt+n",
+    onboardingDone: false,
   });
 
   const [sync, setSync] = createSignal<SyncInfo | null>(null);
@@ -253,6 +257,39 @@ export default function Settings() {
     const next = { ...settings(), ...patch };
     setSettings(next);
     await invoke("set_settings", { settings: next });
+  };
+
+  // Shortcut edits report back which combos failed to bind (taken/invalid).
+  const [keyErrors, setKeyErrors] = createSignal<string[]>([]);
+  const updateShortcut = async (patch: Partial<PinqSettings>) => {
+    await update(patch);
+    setKeyErrors(await invoke<string[]>("shortcut_errors"));
+  };
+
+  const [updMsg, setUpdMsg] = createSignal<string | null>(null);
+  const [updAvail, setUpdAvail] = createSignal<string | null>(null);
+  const checkUpdates = async () => {
+    setUpdMsg("Checking…");
+    setUpdAvail(null);
+    try {
+      const v = await invoke<string | null>("check_updates");
+      if (v) {
+        setUpdAvail(v);
+        setUpdMsg(`Version ${v} is available.`);
+      } else {
+        setUpdMsg("You're on the latest version.");
+      }
+    } catch (e) {
+      setUpdMsg(String(e));
+    }
+  };
+  const installUpdate = async () => {
+    setUpdMsg("Downloading… Pinq will restart itself.");
+    try {
+      await invoke("install_update");
+    } catch (e) {
+      setUpdMsg(String(e));
+    }
   };
 
   return (
@@ -450,6 +487,60 @@ export default function Settings() {
               )}
             </For>
           </div>
+        </Show>
+
+        <p class="settings-hint" style={{ "margin-top": "12px" }}>
+          Global shortcuts (e.g. ctrl+alt+h, ctrl+shift+space). Clear a box to
+          unbind it; changes apply when you leave the field.
+        </p>
+        <div class="shortcut-rows">
+          <label class="shortcut-row">
+            <span>Hide all notes</span>
+            <input
+              class="shortcut-input"
+              value={settings().shortcutHide}
+              onChange={(e) => void updateShortcut({ shortcutHide: e.currentTarget.value })}
+            />
+          </label>
+          <label class="shortcut-row">
+            <span>Quick find</span>
+            <input
+              class="shortcut-input"
+              value={settings().shortcutFind}
+              onChange={(e) => void updateShortcut({ shortcutFind: e.currentTarget.value })}
+            />
+          </label>
+          <label class="shortcut-row">
+            <span>New note</span>
+            <input
+              class="shortcut-input"
+              value={settings().shortcutNew}
+              onChange={(e) => void updateShortcut({ shortcutNew: e.currentTarget.value })}
+            />
+          </label>
+        </div>
+        <Show when={keyErrors().length > 0}>
+          <div class="sync-status">{keyErrors().join(" · ")}</div>
+        </Show>
+
+        <p class="settings-hint" style={{ "margin-top": "12px" }}>
+          Updates install from the signed release feed. New here? Replay the tour.
+        </p>
+        <div class="pair-actions">
+          <button class="library-btn" onClick={() => void checkUpdates()}>
+            Check for updates
+          </button>
+          <Show when={updAvail()}>
+            <button class="library-btn" onClick={() => void installUpdate()}>
+              Install & restart
+            </button>
+          </Show>
+          <button class="library-btn" onClick={() => void invoke("show_onboarding")}>
+            Replay the welcome tour
+          </button>
+        </div>
+        <Show when={updMsg()}>
+          <div class="sync-status">{updMsg()}</div>
         </Show>
 
         <h2>Smart suggestions</h2>

@@ -27,6 +27,11 @@ export interface PinqSettings {
   launchAtLogin: boolean;
   /** Where Pinq surfaces on macOS; ignored on Windows. */
   showIn: "both" | "menubar" | "dock";
+  /** Global shortcut combos ("ctrl+alt+h" style); empty = unbound. */
+  shortcutHide: string;
+  shortcutFind: string;
+  shortcutNew: string;
+  onboardingDone: boolean;
 }
 
 const DEFAULTS: PinqSettings = {
@@ -43,6 +48,10 @@ const DEFAULTS: PinqSettings = {
   smartSuggestions: false,
   launchAtLogin: false,
   showIn: "both",
+  shortcutHide: "ctrl+alt+h",
+  shortcutFind: "ctrl+alt+f",
+  shortcutNew: "ctrl+alt+n",
+  onboardingDone: false,
 };
 
 /** Latest settings this window has seen (kept fresh by the settings event). */

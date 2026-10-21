@@ -198,11 +198,19 @@ export default function Pad(props: { edge: PadEdge }) {
 
   const onKeyDown = (e: KeyboardEvent) => {
     if (e.key === "Escape") cancel();
+    // Keyboard path (spec §28): the pull gesture has no keyboard equivalent,
+    // so Enter/Space on the focused pad creates a note directly.
+    if (e.key === "Enter" || e.key === " ") {
+      e.preventDefault();
+      void invoke("click_create_note");
+    }
   };
 
   return (
     <div
       class={`pad-host edge-${props.edge}`}
+      role="button"
+      aria-label="Sticky pad — pull inward for a new note (or press Enter); press and hold for the menu"
       tabIndex={0}
       onPointerEnter={onPointerEnter}
       onPointerLeave={onPointerLeave}

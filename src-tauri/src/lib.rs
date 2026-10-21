@@ -13,10 +13,12 @@ mod pull;
 mod registry;
 mod reminders;
 mod settings;
+mod shortcuts;
 mod smart;
 mod store;
 mod sync;
 mod tray;
+mod updates;
 mod visibility;
 
 use pinq_core::Rect;
@@ -36,11 +38,13 @@ pub fn run() {
             eprintln!("pinq: second launch deferred to the running instance");
         }))
         .plugin(tauri_plugin_notification::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_autostart::init(
             tauri_plugin_autostart::MacosLauncher::LaunchAgent,
             None,
         ))
         .manage(pull::PullState::default())
+        .manage(shortcuts::ShortcutMap::default())
         .manage(pad::ExpandedPad::default())
         .manage(drag::DragState::default())
         .manage(drag::UndoState::default())
@@ -153,35 +157,14 @@ pub fn run() {
             smart::note_suggestions,
             smart::apply_title,
             smart::dismiss_title_suggestion,
+            shortcuts::shortcut_errors,
+            updates::check_updates,
+            updates::install_update,
+            panels::show_onboarding,
+            panels::onboarding_complete,
         ])
         .setup(|app| {
-            use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, ShortcutState};
-            app.handle().plugin(
-                tauri_plugin_global_shortcut::Builder::new()
-                    .with_handler(|app, shortcut, event| {
-                        if event.state() != ShortcutState::Pressed {
-                            return;
-                        }
-                        let ca = Modifiers::CONTROL | Modifiers::ALT;
-                        if shortcut.matches(ca, Code::KeyH) {
-                            visibility::toggle_user_hidden(app);
-                        } else if shortcut.matches(ca, Code::KeyF) {
-                            let app = app.clone();
-                            std::thread::spawn(move || {
-                                let _ = panels::open_find(&app);
-                            });
-                        } else if shortcut.matches(ca, Code::KeyN) {
-                            let app = app.clone();
-                            std::thread::spawn(move || {
-                                let _ = tray::create_note_at_center(&app);
-                            });
-                        }
-                    })
-                    .build(),
-            )?;
-            let _ = app.global_shortcut().register("ctrl+alt+h");
-            let _ = app.global_shortcut().register("ctrl+alt+f");
-            let _ = app.global_shortcut().register("ctrl+alt+n");
+            shortcuts::init(app.handle())?;
 
             let data_dir = app.path().app_data_dir()?;
             let store = Arc::new(store::Store::open(&data_dir)?);
@@ -208,6 +191,35 @@ pub fn run() {
                 });
             }
             app.manage(settings::SettingsStore::open(data_dir.join("settings.json")));
+            {
+                let cfg = app.state::<settings::SettingsStore>().current();
+                // Bind global shortcuts from settings; failures are kept for
+                // the Settings UI to surface (a combo may be taken).
+                for e in shortcuts::apply(app.handle(), &cfg) {
+                    eprintln!("pinq: shortcut not bound — {e}");
+                }
+            }
+            // Crash recovery (spec S18): flag the session as dirty now; the
+            // exit handler marks it clean. Seeing "dirty" at startup means the
+            // last run died — the DB was integrity-checked on open (corrupt
+            // files restore from backup automatically), so just say so.
+            {
+                let unclean = store.meta_get("clean-exit").as_deref() == Some("0");
+                let _ = store.meta_set("clean-exit", "0");
+                if unclean {
+                    use tauri_plugin_notification::NotificationExt;
+                    let _ = app
+                        .notification()
+                        .builder()
+                        .title("Pinq")
+                        .body(
+                            "Pinq didn't shut down cleanly last time. Your notes were \
+                             checked and restored where needed — rolling backups live in \
+                             Documents/Pinq Exports if anything looks off.",
+                        )
+                        .show();
+                }
+            }
             {
                 let show_in = app.state::<settings::SettingsStore>().current().show_in;
                 #[cfg(target_os = "macos")]
@@ -265,6 +277,10 @@ pub fn run() {
                 let al = app.autolaunch();
                 let _ = if want { al.enable() } else { al.disable() };
             }
+            // First run: a small welcome tour teaching the gestures (S17).
+            if !app.state::<settings::SettingsStore>().current().onboarding_done {
+                let _ = panels::create_onboarding_window(app.handle());
+            }
             Ok(())
         })
         .on_window_event(|window, event| {
@@ -309,6 +325,9 @@ pub fn run() {
             tauri::RunEvent::Exit => {
                 if let Some(store) = app_handle.try_state::<Arc<store::Store>>() {
                     store.flush_places();
+                    // Mark the session clean — startup treats anything else
+                    // as a crash and says so (spec S18).
+                    let _ = store.meta_set("clean-exit", "1");
                 }
             }
             // macOS Dock icon click with no visible windows: open the library.
