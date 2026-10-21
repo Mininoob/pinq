@@ -6,8 +6,11 @@ out of, and *throw* notes back into. Underneath the tactile surface is a full
 object-based PKM system with types, properties, databases, queries, templates, and
 peer-to-peer end-to-end-encrypted sync.
 
-This spec is written for a design + engineering team to build from. No production code
-exists yet; this is the blueprint.
+This spec is the blueprint the app is being built from. As of v0.2.0 the prototype,
+the MVP, and much of V1 are implemented (gestures, canvas notes, tasks, library views,
+links/graph, on-device suggestions, E2EE sync with text merging, recovery phrase,
+encrypted backups, updater + CI); the object/type system (§15–17) and the remaining
+hardening items are the open frontier. See the root README for the shipped feature list.
 
 ## Document map (sections follow the required output order)
 
