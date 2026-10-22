@@ -7,3 +7,4 @@ src-tauri/gen/
 .impeccable/review/
 .impeccable/config.local.json
 .impeccable/questions/
+.claude/

@@ -106,7 +106,9 @@ function start() {
       const line = content.querySelector(".n-line");
       typeInto(line, t, t < 1 || p < 0.62);
       const el = line as HTMLElement | null;
-      const textW = el?.scrollWidth ?? 0;
+      // The text's own width (the line is inline-block in the traveler), not
+      // its box: a block's scrollWidth never drops below the container.
+      const textW = el?.offsetWidth ?? 0;
       const need = textW / 0.84 + 6;
       // Narrow screens: the note may grow to both screen edges; past that the
       // line scrolls to follow the caret, as the app's canvas does.
@@ -114,9 +116,10 @@ function start() {
       const maxW = narrow ? vw - 12 - x : Math.min(vw - base.x - 28, base.w * 1.9);
       const w = Math.min(maxW, Math.max(base.w, need));
       if (el) {
-        const overflow = Math.max(0, textW - w * 0.84);
-        el.style.transform = overflow ? `translateX(${-overflow}px)` : "";
-        el.style.maskImage = overflow ? "linear-gradient(90deg, transparent, #000 36px)" : "";
+        const overflow = textW - w * 0.84;
+        const scrolls = overflow > 2;
+        el.style.transform = scrolls ? `translateX(${-overflow}px)` : "";
+        el.style.maskImage = scrolls ? "linear-gradient(90deg, transparent, #000 36px)" : "";
       }
       return { x, w, h: narrow ? base.h * 0.7 : base.h * 0.62, y: base.y + base.h * (narrow ? 0.15 : 0.19) };
     },
@@ -322,6 +325,33 @@ function start() {
   document.fonts?.ready.then(request);
   frame();
 }
+
+// ---- theme toggle (top right): system default, explicit choice remembered ----
+function initTheme() {
+  const root = document.documentElement;
+  const btn = document.getElementById("theme-toggle");
+  const meta = document.querySelector('meta[name="theme-color"]');
+  const systemDark = window.matchMedia("(prefers-color-scheme: dark)");
+  const current = () => (root.dataset.theme as "dark" | "light" | undefined) ?? (systemDark.matches ? "dark" : "light");
+  const sync = () => {
+    const t = current();
+    btn?.setAttribute("aria-label", t === "dark" ? "Switch to light mode" : "Switch to dark mode");
+    meta?.setAttribute("content", t === "dark" ? "#181715" : "#ECEBE6");
+  };
+  btn?.addEventListener("click", () => {
+    const next = current() === "dark" ? "light" : "dark";
+    root.dataset.theme = next;
+    try {
+      localStorage.setItem("pinq-theme", next);
+    } catch {
+      /* private mode: the choice just won't persist */
+    }
+    sync();
+  });
+  systemDark.addEventListener("change", sync);
+  sync();
+}
+initTheme();
 
 if (!reduce.matches) {
   document.documentElement.classList.add("motion");

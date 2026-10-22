@@ -271,6 +271,11 @@ A near-neutral warm stone and ink system in which every saturated colour is a pi
 
 **The One Ink Band Rule.** The page has exactly one full-bleed ink section (open source). Inside it the paper button is the accent and focus rings switch to paper.
 
+### Dark Theme
+The page follows the system setting until the visitor uses the theme toggle; their choice is saved under `pinq-theme` and applied by an inline head script before first paint. Dark only re-points the neutral tokens: ground #181715, raised #22201d, sidebar #1d1b19, ink #eeeae3, ink-2 #b5aea3, ink-3 #958e83, hairlines in white at 10% and 18%, and the ink band drops to #0e0d0c so it still reads as the one deeper section. Paper never changes: every note, the paper button and the desk hint re-point their ink to the fixed paper-ink tones (#242322, #57534d, #6e6962), so notes look the same in both themes. Labels and wires beside a note (device names, link lines) keep the page ink, not the paper ink.
+
+**The Paper Stays Paper Rule.** Dark mode darkens the room, not the notes. No note colour, grain or peel gets a dark variant.
+
 ## Typography
 
 **Display Font:** Geist (variable, self-hosted, with ui-sans-serif, system-ui fallback)
@@ -351,7 +356,8 @@ Confident, heavy and pill-shaped.
 
 ### Navigation
 - **Style:** a floating pill fixed 14px from the top, centred, translucent raised glass with backdrop blur. Brand (mark plus "Pinq", 750 weight) left, 14.5px 500 ink-2 links that turn ink on hover, small ink Download pill right.
-- **Mobile:** stretches to the viewport minus 24px; links hide.
+- **Mobile:** stretches from 12px on the left to just short of the theme toggle; links hide.
+- **Theme toggle:** a 50px round glass button fixed top right (14px, 16px; 12px on mobile), same glass as the nav, showing the moon in light and the sun in dark. Its aria-label names the theme it switches to.
 
 ### Spec Strip
 The stationery footer under each chapter's copy: a line-2 hairline rule, then a tabular chapter number in ink, an uppercase label at 0.09em, and a right-aligned plain-case descriptor. It numbers chapters 01 to 06 and is the only place chapter numbers appear in copy.

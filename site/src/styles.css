@@ -15,13 +15,30 @@
 /* ---------- Tokens ---------- */
 :root {
   --ground: #ecebe6;
-  --ground-deep: #e2dfd8;
   --raised: #faf9f6;
+  --side: #f4f2ee;
   --ink: #242322;
   --ink-2: #57534d;
   --ink-3: #6e6962;
   --line: rgba(36, 35, 34, 0.12);
   --line-2: rgba(36, 35, 34, 0.2);
+  --ink-hover: #0f0f0e;
+  --nav-bg: rgba(250, 249, 246, 0.8);
+  --chip-bg: rgba(250, 249, 246, 0.6);
+  --ghost: rgba(36, 35, 34, 0.06);
+  --ghost-hover: rgba(36, 35, 34, 0.11);
+  --code-bg: rgba(36, 35, 34, 0.07);
+  --tok-bg: rgba(255, 212, 92, 0.45);
+  --band: #242322;
+  --thumb: rgba(36, 35, 34, 0.35);
+  /* Ink printed ON paper stays dark in both themes: the paper stays light. */
+  --paper-ink: #242322;
+  --paper-ink-2: #57534d;
+  --paper-ink-3: #6e6962;
+  /* page-coloured ink for things beside a note (labels, wires); resolved
+     here so paper scopes can't re-point them */
+  --label: var(--ink-2);
+  --wire: var(--ink);
 
   /* The sticky owns the colour. */
   --paper: #ffd45c;
@@ -60,6 +77,67 @@
   color-scheme: light;
 }
 
+/* Dark: the room dims, the paper doesn't. Chosen theme wins; with no
+   choice yet (or no JS), follow the system. */
+:root[data-theme="dark"] {
+  --ground: #181715;
+  --raised: #22201d;
+  --side: #1d1b19;
+  --ink: #eeeae3;
+  --ink-2: #b5aea3;
+  --ink-3: #958e83;
+  --line: rgba(255, 255, 255, 0.1);
+  --line-2: rgba(255, 255, 255, 0.18);
+  --ink-hover: #ffffff;
+  --nav-bg: rgba(34, 32, 29, 0.82);
+  --chip-bg: rgba(255, 255, 255, 0.04);
+  --ghost: rgba(255, 255, 255, 0.08);
+  --ghost-hover: rgba(255, 255, 255, 0.14);
+  --code-bg: rgba(255, 255, 255, 0.09);
+  --tok-bg: rgba(255, 212, 92, 0.2);
+  --band: #0e0d0c;
+  --thumb: rgba(255, 255, 255, 0.3);
+  color-scheme: dark;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --ground: #181715;
+    --raised: #22201d;
+    --side: #1d1b19;
+    --ink: #eeeae3;
+    --ink-2: #b5aea3;
+    --ink-3: #958e83;
+    --line: rgba(255, 255, 255, 0.1);
+    --line-2: rgba(255, 255, 255, 0.18);
+    --ink-hover: #ffffff;
+    --nav-bg: rgba(34, 32, 29, 0.82);
+    --chip-bg: rgba(255, 255, 255, 0.04);
+    --ghost: rgba(255, 255, 255, 0.08);
+    --ghost-hover: rgba(255, 255, 255, 0.14);
+    --code-bg: rgba(255, 255, 255, 0.09);
+    --tok-bg: rgba(255, 212, 92, 0.2);
+    --band: #0e0d0c;
+    --thumb: rgba(255, 255, 255, 0.3);
+    color-scheme: dark;
+  }
+}
+
+/* Paper surfaces re-point the ink tokens at the dark paper ink, so every
+   rule inside a note keeps working in either theme. */
+.t-sheet,
+.fig-note,
+.card,
+.card-final,
+.fan-note,
+.n-mini,
+.desk-hint,
+.btn-paper {
+  --ink: var(--paper-ink);
+  --ink-2: var(--paper-ink-2);
+  --ink-3: var(--paper-ink-3);
+  color: var(--ink);
+}
+
 /* ---------- Base + browser surfaces ---------- */
 *,
 *::before,
@@ -68,7 +146,7 @@
 }
 html {
   background: var(--ground);
-  scrollbar-color: rgba(36, 35, 34, 0.35) var(--ground);
+  scrollbar-color: var(--thumb) var(--ground);
   scrollbar-width: thin;
   -webkit-text-size-adjust: 100%;
 }
@@ -86,7 +164,7 @@ body {
 }
 ::selection {
   background: var(--paper);
-  color: var(--ink);
+  color: var(--paper-ink);
 }
 a {
   color: inherit;
@@ -107,7 +185,7 @@ code {
   font-size: 0.86em;
   padding: 0.08em 0.36em;
   border-radius: 6px;
-  background: rgba(36, 35, 34, 0.07);
+  background: var(--code-bg);
 }
 h1,
 h2,
@@ -170,16 +248,16 @@ p {
   box-shadow: 0 8px 20px -10px rgba(36, 35, 34, 0.55);
 }
 .btn-ink:hover {
-  background: #0f0f0e;
+  background: var(--ink-hover);
   transform: translateY(-1px);
   box-shadow: 0 14px 26px -12px rgba(36, 35, 34, 0.6);
 }
 .btn-ghost {
-  background: rgba(36, 35, 34, 0.06);
+  background: var(--ghost);
   color: var(--ink);
 }
 .btn-ghost:hover {
-  background: rgba(36, 35, 34, 0.11);
+  background: var(--ghost-hover);
 }
 .btn-paper {
   background: var(--paper);
@@ -225,7 +303,7 @@ p {
   padding: 0 13px;
   border: 1px solid var(--line);
   border-radius: 999px;
-  background: rgba(250, 249, 246, 0.6);
+  background: var(--chip-bg);
   font-size: 13.5px;
   font-weight: 500;
   color: var(--ink-2);
@@ -248,7 +326,7 @@ p {
   gap: 26px;
   padding: 6px 6px 6px 14px;
   border-radius: 999px;
-  background: rgba(250, 249, 246, 0.8);
+  background: var(--nav-bg);
   backdrop-filter: blur(14px) saturate(1.3);
   -webkit-backdrop-filter: blur(14px) saturate(1.3);
   box-shadow:
@@ -277,6 +355,54 @@ p {
 }
 .nav-links a:hover {
   color: var(--ink);
+}
+
+/* Theme toggle, pinned top right; shows the mode you'd switch TO. */
+.theme-toggle {
+  position: fixed;
+  top: 14px;
+  right: 16px;
+  z-index: 50;
+  display: grid;
+  place-items: center;
+  width: 50px;
+  height: 50px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: var(--nav-bg);
+  backdrop-filter: blur(14px) saturate(1.3);
+  -webkit-backdrop-filter: blur(14px) saturate(1.3);
+  color: var(--ink);
+  cursor: pointer;
+  box-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.12) inset,
+    0 10px 30px -14px rgba(0, 0, 0, 0.45);
+  transition: transform 0.25s var(--ease-out);
+}
+.theme-toggle:hover {
+  transform: rotate(-12deg);
+}
+.theme-toggle .ic {
+  width: 20px;
+  height: 20px;
+}
+.theme-toggle .i-sun {
+  display: none;
+}
+:root[data-theme="dark"] .theme-toggle .i-sun {
+  display: block;
+}
+:root[data-theme="dark"] .theme-toggle .i-moon {
+  display: none;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .theme-toggle .i-sun {
+    display: block;
+  }
+  :root:not([data-theme="light"]) .theme-toggle .i-moon {
+    display: none;
+  }
 }
 
 /* ---------- Hero ---------- */
@@ -535,6 +661,9 @@ p {
 .n-text {
   white-space: nowrap;
 }
+.traveler .n-line {
+  display: inline-block;
+}
 .n-text {
   white-space: normal;
 }
@@ -678,7 +807,7 @@ p {
 }
 .n-wires path {
   fill: none;
-  stroke: var(--ink);
+  stroke: var(--wire);
   stroke-width: 1.6;
   stroke-linecap: round;
   vector-effect: non-scaling-stroke;
@@ -721,7 +850,7 @@ p {
   font-weight: 650;
   letter-spacing: 0.08em;
   text-transform: uppercase;
-  color: var(--ink-2);
+  color: var(--label);
 }
 
 /* ---------- Journey ---------- */
@@ -1045,8 +1174,8 @@ html.motion .toast {
   height: 44px;
   padding: 0 18px;
   border-radius: 999px;
-  background: var(--ink);
-  color: var(--raised);
+  background: #242322;
+  color: #f4f1ec;
   font-size: 14.5px;
   font-weight: 550;
   box-shadow: 0 16px 34px -14px rgba(36, 35, 34, 0.6);
@@ -1143,7 +1272,7 @@ html.motion .toast.show {
 .lib-side {
   padding: 22px 12px;
   border-right: 1px solid var(--line);
-  background: #f4f2ee;
+  background: var(--side);
 }
 .lib-row {
   display: flex;
@@ -1160,7 +1289,7 @@ html.motion .toast.show {
   color: var(--ink-3);
 }
 .lib-row.on {
-  background: rgba(255, 212, 92, 0.42);
+  background: var(--tok-bg);
   color: var(--ink);
   font-weight: 650;
 }
@@ -1194,7 +1323,7 @@ html.motion .toast.show {
 .lib-search span {
   padding: 2px 8px;
   border-radius: 6px;
-  background: rgba(255, 212, 92, 0.45);
+  background: var(--tok-bg);
   color: var(--ink);
 }
 .lib-grid {
@@ -1317,7 +1446,7 @@ html.motion .card.slot.landed .card-final {
 /* ---------- Open source (the one ink band) ---------- */
 .source {
   padding: 14vh 0;
-  background: var(--ink);
+  background: var(--band);
   color: #f4f1ec;
 }
 .source .lede {
@@ -1354,7 +1483,7 @@ html.motion .card.slot.landed .card-final {
 }
 .source ::selection {
   background: var(--paper);
-  color: var(--ink);
+  color: var(--paper-ink);
 }
 .source :focus-visible {
   outline-color: var(--paper);
@@ -1519,8 +1648,13 @@ html.motion .card.slot.landed .card-final {
 @media (max-width: 899px) {
   .nav {
     gap: 14px;
-    width: calc(100% - 24px);
+    left: 12px;
+    transform: none;
+    width: calc(100% - 24px - 58px);
     justify-content: space-between;
+  }
+  .theme-toggle {
+    right: 12px;
   }
   .nav-links {
     display: none;
