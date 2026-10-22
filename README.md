@@ -1,6 +1,6 @@
 # Pinq
 
-[![License: MIT](https://img.shields.io/badge/license-MIT-ffd45c.svg)](LICENSE) · [Download](https://github.com/Mininoob/pinq/releases/latest) · Website source in [`site/`](site/)
+[![License: MIT](https://img.shields.io/badge/license-MIT-ffd45c.svg)](LICENSE) · [Download](https://github.com/Mininoob/pinq/releases/latest) · [Website](https://pinq-note.vercel.app)
 
 **Sticky notes that live on your desktop, backed by a real knowledge base — local-first, end-to-end encrypted, no account, ever.**
 
