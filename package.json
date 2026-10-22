@@ -1,5 +1,6 @@
 {
   "name": "pinq",
+  "license": "MIT",
   "version": "0.2.0",
   "description": "Pinq — local-first sticky notes and personal knowledge management",
   "type": "module",

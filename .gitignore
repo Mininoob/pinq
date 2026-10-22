@@ -4,3 +4,6 @@ target/
 src-tauri/gen/
 *.log
 .DS_Store
+.impeccable/review/
+.impeccable/config.local.json
+.impeccable/questions/

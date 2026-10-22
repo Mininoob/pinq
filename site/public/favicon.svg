@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" role="img" aria-labelledby="title desc">
+  <title id="title">pinq app icon</title>
+  <desc id="desc">Full-bleed app icon featuring the pinq sticky note mascot.</desc>
+
+  <!-- Full-bleed background; operating systems apply their own corner mask -->
+  <rect width="1024" height="1024" fill="#FFF8EE"/>
+
+  <g transform="translate(102 86) scale(.8)">
+    <defs>
+      <clipPath id="note-shape-app">
+        <rect x="72" y="72" width="880" height="880" rx="190"/>
+      </clipPath>
+    </defs>
+    <rect x="72" y="72" width="880" height="880" rx="190" fill="#FFD45C"/>
+    <path
+      d="M622 952V760c0-59 48-107 107-107h223c-12 103-65 184-151 231 23 45 62 68 119 72 33 2 53 22 51 51-2 30-25 48-58 46-109-7-181-58-214-145-22 28-49 44-77 44Z"
+      fill="#FF6F6C"
+      clip-path="url(#note-shape-app)"/>
+    <path
+      d="M697 866c29 87 95 136 216 144 33 2 56-16 58-46 2-29-18-49-51-51-66-4-104-34-119-83Z"
+      fill="#FF6F6C"/>
+    <circle cx="347" cy="449" r="39" fill="#242322"/>
+    <circle cx="661" cy="449" r="39" fill="#242322"/>
+    <path d="M445 548c18 29 42 44 70 44s52-15 70-44" fill="none" stroke="#242322" stroke-width="32" stroke-linecap="round"/>
+  </g>
+</svg>

@@ -1,0 +1,759 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-10-22T01:23:27+00:00",
+  "title": "Design System: Pinq (website)",
+  "scope": "Governs site/ only. The desktop app UI in src/ is a separate incumbent system and is not documented here.",
+  "extensions": {
+    "colorMeta": {
+      "ground": {
+        "role": "neutral",
+        "displayName": "Stone Ground",
+        "canonical": "#ecebe6",
+        "oklch": "oklch(93.9% 0.007 97.4)",
+        "tonalRamp": [
+          "#0c0b08",
+          "#252420",
+          "#41403c",
+          "#5e5e59",
+          "#7e7d79",
+          "#9f9e9a",
+          "#c5c4bf",
+          "#f0eee9"
+        ]
+      },
+      "raised": {
+        "role": "neutral",
+        "displayName": "Raised Paper White",
+        "canonical": "#faf9f6",
+        "oklch": "oklch(98.2% 0.004 91.4)",
+        "tonalRamp": [
+          "#0c0b09",
+          "#252422",
+          "#40403d",
+          "#5e5d5b",
+          "#7e7d7a",
+          "#9f9e9b",
+          "#c5c4c1",
+          "#efeeeb"
+        ]
+      },
+      "library-sidebar": {
+        "role": "neutral",
+        "displayName": "Sidebar Stone",
+        "canonical": "#f4f2ee",
+        "oklch": "oklch(96.2% 0.006 84.6)",
+        "tonalRamp": [
+          "#0c0b09",
+          "#252421",
+          "#413f3c",
+          "#5f5d5a",
+          "#7f7d79",
+          "#a09e9a",
+          "#c6c4c0",
+          "#f0eeea"
+        ]
+      },
+      "ink": {
+        "role": "neutral",
+        "displayName": "Ink",
+        "canonical": "#242322",
+        "oklch": "oklch(25.7% 0.002 67.7)",
+        "tonalRamp": [
+          "#0c0b0a",
+          "#252423",
+          "#413f3e",
+          "#5e5d5c",
+          "#7e7d7c",
+          "#9f9e9d",
+          "#c5c4c2",
+          "#efeeed"
+        ]
+      },
+      "ink-hover": {
+        "role": "neutral",
+        "displayName": "Ink, Pressed Dark",
+        "canonical": "#0f0f0e",
+        "oklch": "oklch(16.8% 0.002 106.6)",
+        "tonalRamp": [
+          "#0b0b0a",
+          "#242423",
+          "#40403f",
+          "#5e5e5c",
+          "#7d7d7c",
+          "#9e9e9d",
+          "#c4c4c3",
+          "#eeeeed"
+        ]
+      },
+      "ink-2": {
+        "role": "neutral",
+        "displayName": "Ink 2",
+        "canonical": "#57534d",
+        "oklch": "oklch(44.4% 0.011 78.2)",
+        "tonalRamp": [
+          "#0e0b06",
+          "#27231e",
+          "#433f39",
+          "#615d57",
+          "#817d76",
+          "#a29e97",
+          "#c8c3bc",
+          "#f3eee6"
+        ]
+      },
+      "ink-3": {
+        "role": "neutral",
+        "displayName": "Ink 3",
+        "canonical": "#6e6962",
+        "oklch": "oklch(52.3% 0.012 76.5)",
+        "tonalRamp": [
+          "#0e0a06",
+          "#28231d",
+          "#443f39",
+          "#625d56",
+          "#827c75",
+          "#a39e96",
+          "#c9c3bb",
+          "#f3eee5"
+        ]
+      },
+      "paper": {
+        "role": "primary",
+        "displayName": "Pad Yellow",
+        "canonical": "#ffd45c",
+        "oklch": "oklch(88.5% 0.144 89.3)",
+        "tonalRamp": [
+          "#5c4300",
+          "#8a6400",
+          "#b8862a",
+          "#dcaa31",
+          "#e9b83c",
+          "#f3c446",
+          "#fbcd52",
+          "#ffd45c"
+        ],
+        "note": "Upper steps are the pad strata as built (s4 to s0)."
+      },
+      "paper-hover": {
+        "role": "primary",
+        "displayName": "Pad Yellow, Hover",
+        "canonical": "#ffdc76",
+        "oklch": "oklch(90.4% 0.127 90.8)",
+        "tonalRamp": [
+          "#120a00",
+          "#322100",
+          "#563b00",
+          "#795800",
+          "#9a7900",
+          "#bc9b2e",
+          "#e0c16a",
+          "#ffedb6"
+        ]
+      },
+      "paper-edge": {
+        "role": "primary",
+        "displayName": "Pad Yellow, Sheet Edge",
+        "canonical": "#f3c446",
+        "oklch": "oklch(84.0% 0.148 87.8)",
+        "tonalRamp": [
+          "#140900",
+          "#361f00",
+          "#5c3800",
+          "#805500",
+          "#a27500",
+          "#c59700",
+          "#e8bf55",
+          "#ffecac"
+        ]
+      },
+      "paper-done": {
+        "role": "primary",
+        "displayName": "Pad Yellow, Done",
+        "canonical": "#f6d572",
+        "oklch": "oklch(88.1% 0.124 91.3)",
+        "tonalRamp": [
+          "#120a00",
+          "#312100",
+          "#553c00",
+          "#775900",
+          "#997900",
+          "#bb9b34",
+          "#dec26d",
+          "#ffeeb7"
+        ]
+      },
+      "coral": {
+        "role": "secondary",
+        "displayName": "Peel Coral",
+        "canonical": "#ff6f6c",
+        "oklch": "oklch(71.7% 0.177 23.8)",
+        "tonalRamp": [
+          "#1f0001",
+          "#4b0007",
+          "#7d0012",
+          "#ab1c27",
+          "#d24547",
+          "#f96967",
+          "#ff9892",
+          "#ffd4cd"
+        ]
+      },
+      "coral-deep": {
+        "role": "secondary",
+        "displayName": "Deep Coral",
+        "canonical": "#dc4d4a",
+        "oklch": "oklch(61.6% 0.179 25.1)",
+        "tonalRamp": [
+          "#1f0001",
+          "#4c0004",
+          "#7e000c",
+          "#ac1a22",
+          "#d34442",
+          "#fa6963",
+          "#ff988f",
+          "#ffd3cb"
+        ]
+      },
+      "link": {
+        "role": "secondary",
+        "displayName": "Wiki-Link Red",
+        "canonical": "#9e2522",
+        "oklch": "oklch(46.2% 0.158 27.0)",
+        "tonalRamp": [
+          "#1d0101",
+          "#480707",
+          "#781112",
+          "#a42b27",
+          "#ca5047",
+          "#f17267",
+          "#ff9f92",
+          "#ffd7cd"
+        ]
+      },
+      "note-pinq": {
+        "role": "tertiary",
+        "displayName": "Note Cream (pinq)",
+        "canonical": "#fff8ee",
+        "oklch": "oklch(98.2% 0.015 77.1)",
+        "tonalRamp": [
+          "#0f0a05",
+          "#28231c",
+          "#443f37",
+          "#635d54",
+          "#827c73",
+          "#a49d94",
+          "#cac3b9",
+          "#f4ede3"
+        ]
+      },
+      "note-amber": {
+        "role": "tertiary",
+        "displayName": "Note Amber",
+        "canonical": "#fdf0a4",
+        "oklch": "oklch(94.8% 0.096 99.7)",
+        "tonalRamp": [
+          "#0f0b00",
+          "#2b2400",
+          "#4a4000",
+          "#6b5e09",
+          "#8b7e34",
+          "#ada056",
+          "#d1c685",
+          "#f7f0c5"
+        ]
+      },
+      "note-mint": {
+        "role": "tertiary",
+        "displayName": "Note Mint",
+        "canonical": "#d9f7e8",
+        "oklch": "oklch(95.0% 0.037 164.1)",
+        "tonalRamp": [
+          "#060d0a",
+          "#1a2821",
+          "#30453b",
+          "#4a6458",
+          "#698577",
+          "#8aa698",
+          "#b2cbbe",
+          "#e2f3eb"
+        ]
+      },
+      "note-sky": {
+        "role": "tertiary",
+        "displayName": "Note Sky",
+        "canonical": "#d9edfd",
+        "oklch": "oklch(93.6% 0.030 242.0)",
+        "tonalRamp": [
+          "#070c0f",
+          "#1c252c",
+          "#34424d",
+          "#4f606e",
+          "#6e808e",
+          "#8fa1b0",
+          "#b6c7d4",
+          "#e5f0fa"
+        ]
+      },
+      "note-rose": {
+        "role": "tertiary",
+        "displayName": "Note Rose",
+        "canonical": "#fddce7",
+        "oklch": "oklch(92.5% 0.039 355.8)",
+        "tonalRamp": [
+          "#10090b",
+          "#2e1f24",
+          "#4f3840",
+          "#70555e",
+          "#91747e",
+          "#b3959f",
+          "#d8bbc5",
+          "#fce9ef"
+        ]
+      },
+      "note-violet": {
+        "role": "tertiary",
+        "displayName": "Note Violet",
+        "canonical": "#e6defc",
+        "oklch": "oklch(91.6% 0.041 297.8)",
+        "tonalRamp": [
+          "#0c0a11",
+          "#25212f",
+          "#423c50",
+          "#605972",
+          "#807893",
+          "#a199b5",
+          "#c6c0d9",
+          "#f0ebfd"
+        ]
+      },
+      "note-graphite": {
+        "role": "tertiary",
+        "displayName": "Note Graphite",
+        "canonical": "#e5e7eb",
+        "oklch": "oklch(92.8% 0.006 264.5)",
+        "tonalRamp": [
+          "#0a0b0e",
+          "#232427",
+          "#3e4043",
+          "#5c5e61",
+          "#7b7d81",
+          "#9c9ea2",
+          "#c2c4c8",
+          "#eceef2"
+        ],
+        "note": "Part of the app palette; not yet shown on the site."
+      },
+      "band-text": {
+        "role": "neutral",
+        "displayName": "Ink Band Text",
+        "canonical": "#f4f1ec",
+        "oklch": "oklch(95.9% 0.007 80.7)",
+        "tonalRamp": [
+          "#0d0b08",
+          "#262420",
+          "#423f3b",
+          "#605d59",
+          "#7f7d78",
+          "#a19e99",
+          "#c6c4bf",
+          "#f1eee9"
+        ]
+      },
+      "band-text-2": {
+        "role": "neutral",
+        "displayName": "Ink Band Lede",
+        "canonical": "#c9c3ba",
+        "oklch": "oklch(82.0% 0.014 78.2)",
+        "tonalRamp": [
+          "#0e0a05",
+          "#28231c",
+          "#443f38",
+          "#625d55",
+          "#827c74",
+          "#a39e95",
+          "#c9c3ba",
+          "#f4eee4"
+        ]
+      },
+      "band-code": {
+        "role": "neutral",
+        "displayName": "Ink Band Code Panel",
+        "canonical": "#2f2d2b",
+        "oklch": "oklch(29.9% 0.005 67.7)",
+        "tonalRamp": [
+          "#0c0b09",
+          "#262422",
+          "#413f3d",
+          "#5f5d5b",
+          "#7f7d7a",
+          "#a09e9b",
+          "#c6c3c1",
+          "#f1eeeb"
+        ]
+      },
+      "band-comment": {
+        "role": "neutral",
+        "displayName": "Ink Band Comment",
+        "canonical": "#a39d94",
+        "oklch": "oklch(69.8% 0.015 78.2)",
+        "tonalRamp": [
+          "#0f0a05",
+          "#28231c",
+          "#443f37",
+          "#625d55",
+          "#827c74",
+          "#a39d94",
+          "#c9c3ba",
+          "#f4eee4"
+        ]
+      },
+      "line": {
+        "role": "neutral",
+        "displayName": "Hairline",
+        "canonical": "rgba(36, 35, 34, 0.12)"
+      },
+      "line-2": {
+        "role": "neutral",
+        "displayName": "Hairline Strong",
+        "canonical": "rgba(36, 35, 34, 0.2)"
+      }
+    },
+    "typographyMeta": {
+      "display": {
+        "displayName": "Display",
+        "purpose": "Hero headline only; mobile clamp(2.6rem, 11vw, 3.4rem)."
+      },
+      "headline": {
+        "displayName": "Headline",
+        "purpose": "Section headlines, max 15ch."
+      },
+      "headline-chapter": {
+        "displayName": "Chapter Headline",
+        "purpose": "The six journey chapter headings."
+      },
+      "title": {
+        "displayName": "Title",
+        "purpose": "Fact terms and FAQ questions (650)."
+      },
+      "note-title": {
+        "displayName": "Note Title",
+        "purpose": "Titles written on a note."
+      },
+      "lede": {
+        "displayName": "Lede",
+        "purpose": "One paragraph under a section headline, ink-2, max 40rem."
+      },
+      "body": {
+        "displayName": "Body",
+        "purpose": "Copy columns at 30 to 34rem, ink-2."
+      },
+      "note-body": {
+        "displayName": "Note Body",
+        "purpose": "Text on a note."
+      },
+      "button": {
+        "displayName": "Button",
+        "purpose": "Pill button labels."
+      },
+      "label-spec": {
+        "displayName": "Spec Label",
+        "purpose": "Uppercase stationery label in the chapter spec strip; never monospace."
+      },
+      "label-pill": {
+        "displayName": "Pill Label",
+        "purpose": "Legend, sync lock and small pills."
+      },
+      "mono": {
+        "displayName": "Mono",
+        "purpose": "Code, search queries and filter tokens only."
+      }
+    },
+    "materials": [
+      {
+        "name": "glow",
+        "value": "radial-gradient(120% 95% at 28% 16%, rgba(255,255,255,.34), rgba(255,255,255,0) 58%)",
+        "purpose": "Inner light on every note."
+      },
+      {
+        "name": "paper-light",
+        "value": "var(--glow), linear-gradient(180deg, rgba(150,100,0,0) 62%, rgba(150,100,0,.09))",
+        "purpose": "Glow plus warm bottom settle; yellow paper only."
+      },
+      {
+        "name": "grain",
+        "value": "SVG feTurbulence fractalNoise, baseFrequency .72, 3 octaves, warm tint at .26 alpha, 180px tile",
+        "purpose": "Warm paper tooth for yellow paper."
+      },
+      {
+        "name": "grain-cool",
+        "value": "SVG feTurbulence fractalNoise, baseFrequency .72, 3 octaves, neutral tint at .1 alpha, 180px tile",
+        "purpose": "Lighter neutral tooth for the pastel notes."
+      },
+      {
+        "name": "torn",
+        "value": "Irregular SVG path mask, 400x16 viewBox, applied 13px tall at the top edge, with a 16px fibre-lip gradient",
+        "purpose": "Torn top edge after the rip; uneven, not a perforation."
+      },
+      {
+        "name": "peel",
+        "value": "linear-gradient(135deg, #ff9b98 0%, var(--coral) 34%, var(--coral-deep) 50%) clipped to polygon(0 0,100% 0,0 100%), drop-shadow(-2px -2px 3px rgba(36,35,34,.22))",
+        "purpose": "The lower-right corner curl; the sheet is masked diagonally beneath it."
+      }
+    ],
+    "shadows": [
+      {
+        "name": "pill-lift",
+        "value": "0 8px 20px -10px rgba(36,35,34,.55)",
+        "purpose": "Ink button at rest."
+      },
+      {
+        "name": "pill-lift-hover",
+        "value": "0 14px 26px -12px rgba(36,35,34,.6)",
+        "purpose": "Ink button on hover."
+      },
+      {
+        "name": "paper-glow",
+        "value": "0 10px 24px -12px rgba(255,212,92,.55)",
+        "purpose": "Paper button on the ink band."
+      },
+      {
+        "name": "nav-glass",
+        "value": "0 1px 0 rgba(255,255,255,.7) inset, 0 10px 30px -14px rgba(36,35,34,.35)",
+        "purpose": "Floating nav, with backdrop blur(14px) saturate(1.3)."
+      },
+      {
+        "name": "note-rest",
+        "value": "0 14px 24px -18px rgba(36,35,34,.55)",
+        "purpose": "Library cards."
+      },
+      {
+        "name": "note-figure",
+        "value": "0 30px 50px -28px rgba(36,35,34,.55)",
+        "purpose": "Static chapter figures."
+      },
+      {
+        "name": "note-travel",
+        "value": "drop-shadow(0 22px 26px rgba(36,35,34,.26)) drop-shadow(0 2px 3px rgba(36,35,34,.18))",
+        "purpose": "The masked traveling note (filter)."
+      },
+      {
+        "name": "window",
+        "value": "0 1px 0 rgba(255,255,255,.8) inset, 0 50px 90px -50px rgba(36,35,34,.5), 0 0 0 1px rgba(36,35,34,.12)",
+        "purpose": "Library window."
+      },
+      {
+        "name": "desk",
+        "value": "0 1px 0 rgba(255,255,255,.5) inset, 0 40px 80px -40px rgba(36,35,34,.45)",
+        "purpose": "Hero desk frame."
+      },
+      {
+        "name": "toast",
+        "value": "0 16px 34px -14px rgba(36,35,34,.6)",
+        "purpose": "Undo toast."
+      }
+    ],
+    "motion": [
+      {
+        "name": "ease-out",
+        "value": "cubic-bezier(0.16, 1, 0.3, 1)",
+        "purpose": "All CSS state transitions (buttons, legend, fan lift, FAQ plus)."
+      },
+      {
+        "name": "scroll-ease-out",
+        "value": "1 - (1 - t)^3",
+        "purpose": "Scroll-scrubbed reveals inside chapters."
+      },
+      {
+        "name": "scroll-ease-in-out",
+        "value": "cubic in-out",
+        "purpose": "Travel, land and tuck poses."
+      },
+      {
+        "name": "rip",
+        "value": "first 42% of a viewport (30% under 900px)",
+        "purpose": "Corner curls back, then the sheet lifts 18px, rotates -5deg and tears."
+      },
+      {
+        "name": "travel",
+        "value": "pad to stage with a sideways swing (-90px desktop, -30px mobile) and a 5deg wobble",
+        "purpose": "Carries the torn note to chapter 01."
+      },
+      {
+        "name": "chapters",
+        "value": "six renderers keyed to progress through each chapter",
+        "purpose": "Write, Tasks, Files, Links, Throw and tuck, Sync."
+      },
+      {
+        "name": "land",
+        "value": "over 45% of a viewport after chapter 06",
+        "purpose": "Eases into the empty library slot; the static card takes over."
+      },
+      {
+        "name": "snap",
+        "value": "scroll-snap-type: y proximity, chapters centred (desktop only)",
+        "purpose": "Soft rest at each chapter."
+      },
+      {
+        "name": "reduced-motion",
+        "value": "controller never starts; all animation and transition disabled",
+        "purpose": "Static figures show each chapter pose in place; hero does not pin."
+      }
+    ],
+    "breakpoints": [
+      {
+        "name": "narrow",
+        "value": "max-width: 899px"
+      },
+      {
+        "name": "wide",
+        "value": "min-width: 900px"
+      }
+    ]
+  },
+  "components": [
+    {
+      "name": "Ink Pill Button",
+      "kind": "button",
+      "refersTo": "button-ink",
+      "description": "The primary CTA (Download). Ink pill with a pooled lift shadow.",
+      "html": "<a class=\"ds-btn-ink\" href=\"#\"><svg width=\"18\" height=\"18\" viewBox=\"0 0 24 24\" aria-hidden=\"true\"><path d=\"M12 4v11m0 0-4.5-4.5M12 15l4.5-4.5M5 19.5h14\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.9\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/></svg>Download free</a>",
+      "css": ".ds-btn-ink{display:inline-flex;align-items:center;gap:9px;height:48px;padding:0 22px;border-radius:999px;background:#242322;color:#faf9f6;font:600 15.5px/1 \"Geist\",system-ui,sans-serif;letter-spacing:-0.01em;text-decoration:none;white-space:nowrap;box-shadow:0 8px 20px -10px rgba(36,35,34,.55);transition:transform .25s cubic-bezier(.16,1,.3,1),background-color .2s,box-shadow .25s cubic-bezier(.16,1,.3,1)}.ds-btn-ink:hover{background:#0f0f0e;transform:translateY(-1px);box-shadow:0 14px 26px -12px rgba(36,35,34,.6)}.ds-btn-ink:active{transform:translateY(1px) scale(.985)}.ds-btn-ink:focus-visible{outline:2px solid #242322;outline-offset:3px}"
+    },
+    {
+      "name": "Ghost Pill Button",
+      "kind": "button",
+      "refersTo": "button-ghost",
+      "description": "Secondary action beside the ink CTA.",
+      "html": "<a class=\"ds-btn-ghost\" href=\"#\">View on GitHub</a>",
+      "css": ".ds-btn-ghost{display:inline-flex;align-items:center;gap:9px;height:48px;padding:0 22px;border-radius:999px;background:rgba(36,35,34,.06);color:#242322;font:600 15.5px/1 \"Geist\",system-ui,sans-serif;letter-spacing:-0.01em;text-decoration:none;transition:background-color .2s,transform .25s cubic-bezier(.16,1,.3,1)}.ds-btn-ghost:hover{background:rgba(36,35,34,.11)}.ds-btn-ghost:active{transform:translateY(1px) scale(.985)}.ds-btn-ghost:focus-visible{outline:2px solid #242322;outline-offset:3px}"
+    },
+    {
+      "name": "Paper Pill Button",
+      "kind": "button",
+      "refersTo": "button-paper",
+      "description": "The accent button, used only on the ink band.",
+      "html": "<div class=\"ds-band\"><a class=\"ds-btn-paper\" href=\"#\">Mininoob/pinq on GitHub</a></div>",
+      "css": ".ds-band{background:#242322;padding:32px}.ds-btn-paper{display:inline-flex;align-items:center;height:48px;padding:0 22px;border-radius:999px;background:#ffd45c;color:#242322;font:600 15.5px/1 \"Geist\",system-ui,sans-serif;letter-spacing:-0.01em;text-decoration:none;box-shadow:0 10px 24px -12px rgba(255,212,92,.55);transition:transform .25s cubic-bezier(.16,1,.3,1),background-color .2s}.ds-btn-paper:hover{background:#ffdc76;transform:translateY(-1px)}.ds-btn-paper:active{transform:translateY(1px) scale(.985)}.ds-btn-paper:focus-visible{outline:2px solid #ffd45c;outline-offset:3px}"
+    },
+    {
+      "name": "Chip",
+      "kind": "chip",
+      "refersTo": "chip",
+      "description": "Informational pill (platform, license, no account). No selected state.",
+      "html": "<ul class=\"ds-chips\"><li class=\"ds-chip\">Windows</li><li class=\"ds-chip\">macOS</li><li class=\"ds-chip\">MIT licensed</li></ul>",
+      "css": ".ds-chips{display:flex;gap:8px;margin:0;padding:0;list-style:none}.ds-chip{display:inline-flex;align-items:center;height:32px;padding:0 13px;border:1px solid rgba(36,35,34,.12);border-radius:999px;background:rgba(250,249,246,.6);font:500 13.5px \"Geist\",system-ui,sans-serif;color:#57534d}"
+    },
+    {
+      "name": "Pill Nav",
+      "kind": "nav",
+      "refersTo": "nav",
+      "description": "Floating translucent pill nav, centred at the top.",
+      "html": "<header class=\"ds-nav\"><a class=\"ds-nav-brand\" href=\"#\">Pinq</a><nav class=\"ds-nav-links\"><a href=\"#\">Features</a><a href=\"#\">Library</a><a href=\"#\">Open source</a></nav><a class=\"ds-nav-cta\" href=\"#\">Download</a></header>",
+      "css": ".ds-nav{display:inline-flex;align-items:center;gap:26px;padding:6px 6px 6px 14px;border-radius:999px;background:rgba(250,249,246,.8);backdrop-filter:blur(14px) saturate(1.3);box-shadow:0 1px 0 rgba(255,255,255,.7) inset,0 10px 30px -14px rgba(36,35,34,.35);font-family:\"Geist\",system-ui,sans-serif}.ds-nav-brand{font-weight:750;font-size:17px;letter-spacing:-0.02em;color:#242322;text-decoration:none}.ds-nav-links{display:flex;gap:22px}.ds-nav-links a{font-size:14.5px;font-weight:500;color:#57534d;text-decoration:none;transition:color .2s}.ds-nav-links a:hover{color:#242322}.ds-nav a:focus-visible{outline:2px solid #242322;outline-offset:3px;border-radius:6px}.ds-nav-cta{display:inline-flex;align-items:center;height:38px;padding:0 16px;border-radius:999px;background:#242322;color:#faf9f6;font-weight:600;font-size:14px;text-decoration:none;transition:background-color .2s}.ds-nav-cta:hover{background:#0f0f0e}"
+    },
+    {
+      "name": "Chapter Legend",
+      "kind": "nav",
+      "refersTo": "legend-pill",
+      "description": "01 to 06 deep-link pills above the stage; the active one is ink and reveals its name.",
+      "html": "<ol class=\"ds-legend\"><li><a href=\"#\"><b>01</b></a></li><li><a class=\"on\" href=\"#\"><b>02</b><span>Tasks</span></a></li><li><a href=\"#\"><b>03</b></a></li></ol>",
+      "css": ".ds-legend{display:flex;gap:4px;margin:0;padding:0;list-style:none;font-family:\"Geist\",system-ui,sans-serif}.ds-legend a{display:inline-flex;gap:6px;height:30px;padding:0 10px;border-radius:999px;font-size:12.5px;font-weight:600;line-height:30px;color:#6e6962;text-decoration:none;transition:background-color .25s,color .25s}.ds-legend a:hover{color:#242322}.ds-legend a:focus-visible{outline:2px solid #242322;outline-offset:3px}.ds-legend a.on{background:#242322;color:#faf9f6}.ds-legend b{font-variant-numeric:tabular-nums}"
+    },
+    {
+      "name": "Spec Strip",
+      "kind": "custom",
+      "refersTo": "label-spec",
+      "description": "Stationery footer under each chapter caption: hairline, tabular number, uppercase label, plain descriptor.",
+      "html": "<p class=\"ds-spec\"><b>02</b><span>Tasks</span><span>status, due date, checklist</span></p>",
+      "css": ".ds-spec{display:flex;align-items:baseline;gap:14px;max-width:30rem;margin:0;padding-top:12px;border-top:1px solid rgba(36,35,34,.2);font:650 12px \"Geist\",system-ui,sans-serif;letter-spacing:.09em;text-transform:uppercase;color:#57534d}.ds-spec b{font-size:13px;font-variant-numeric:tabular-nums;color:#242322}.ds-spec span:last-child{margin-left:auto;font-weight:500;letter-spacing:.04em;text-transform:none;font-size:13px}"
+    },
+    {
+      "name": "Sticky Note",
+      "kind": "card",
+      "refersTo": "sticky-note",
+      "description": "Lit yellow paper with coral peel, status and due pills, checklist and the six-square ledger.",
+      "html": "<div class=\"ds-note-wrap\"><div class=\"ds-note\"><div class=\"ds-note-head\"><span class=\"ds-st\">done</span><span class=\"ds-due\">Sat</span></div><p class=\"ds-note-title\">Saturday</p><ul class=\"ds-checks\"><li><span class=\"ds-box\"><svg width=\"13\" height=\"13\" viewBox=\"0 0 24 24\"><path d=\"m5.5 12.5 4 4 9-9\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2.4\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/></svg></span>pick up the film</li><li><span class=\"ds-box\"><svg width=\"13\" height=\"13\" viewBox=\"0 0 24 24\"><path d=\"m5.5 12.5 4 4 9-9\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2.4\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/></svg></span>call mum back</li></ul><ol class=\"ds-ledger\"><li class=\"d\"></li><li class=\"n\"></li><li></li><li></li><li></li><li></li></ol></div><div class=\"ds-peel\"></div></div>",
+      "css": ".ds-note-wrap{position:relative;width:300px;aspect-ratio:1;rotate:1.5deg;filter:drop-shadow(0 22px 26px rgba(36,35,34,.26)) drop-shadow(0 2px 3px rgba(36,35,34,.18))}.ds-note{position:absolute;inset:0;padding:22px 24px;border-radius:13%;color:#242322;font:400 15.5px/1.45 \"Geist\",system-ui,sans-serif;background:radial-gradient(120% 95% at 28% 16%,rgba(255,255,255,.34),rgba(255,255,255,0) 58%),linear-gradient(180deg,rgba(150,100,0,0) 62%,rgba(150,100,0,.09)),#ffd45c;-webkit-mask-image:linear-gradient(315deg,transparent 31px,#000 31.6px);mask-image:linear-gradient(315deg,transparent 31px,#000 31.6px)}.ds-peel{position:absolute;right:0;bottom:0;width:44px;height:44px;clip-path:polygon(0 0,100% 0,0 100%);background:linear-gradient(135deg,#ff9b98 0%,#ff6f6c 34%,#dc4d4a 50%)}.ds-note-head{display:flex;gap:6px;margin-bottom:12px}.ds-st,.ds-due{height:22px;padding:0 10px;border-radius:999px;font-size:12px;font-weight:650;line-height:22px}.ds-st{background:#242322;color:#ffd45c}.ds-due{background:rgba(36,35,34,.08)}.ds-note-title{margin:0 0 6px;font-weight:700;font-size:18px;letter-spacing:-.015em}.ds-checks{margin:0;padding:0;list-style:none;display:grid;gap:8px}.ds-checks li{display:flex;gap:10px;align-items:center;opacity:.62}.ds-box{display:grid;place-items:center;width:19px;height:19px;border-radius:5px;background:#242322;color:#ffd45c}.ds-ledger{position:absolute;left:8%;bottom:6.5%;display:flex;gap:4px;margin:0;padding:0;list-style:none}.ds-ledger li{width:9px;height:9px;border-radius:2.5px;box-shadow:inset 0 0 0 1.5px rgba(36,35,34,.35)}.ds-ledger li.d{background:#242322;box-shadow:none}.ds-ledger li.n{background:#ff6f6c;box-shadow:none}"
+    },
+    {
+      "name": "Library Card",
+      "kind": "card",
+      "refersTo": "library-card",
+      "description": "A filed note in one of the seven app palettes, cool tooth, slight rotation.",
+      "html": "<div class=\"ds-card\"><p>Maya</p><span>window seat, always. allergic to cats</span></div>",
+      "css": ".ds-card{width:200px;aspect-ratio:1;padding:16px;border-radius:14px;background:radial-gradient(120% 95% at 28% 16%,rgba(255,255,255,.34),rgba(255,255,255,0) 58%),#d9f7e8;box-shadow:0 14px 24px -18px rgba(36,35,34,.55);rotate:-1.4deg;font-family:\"Geist\",system-ui,sans-serif;color:#242322;transition:transform .45s cubic-bezier(.16,1,.3,1)}.ds-card:hover{transform:translateY(-6px)}.ds-card p{margin:0;font-weight:700;font-size:16px;letter-spacing:-.01em}.ds-card span{display:block;margin-top:6px;font-size:13.5px;line-height:1.45;color:#57534d}"
+    },
+    {
+      "name": "Search Field",
+      "kind": "input",
+      "refersTo": "library-window",
+      "description": "The library search pill: mono query with a yellow filter token.",
+      "html": "<label class=\"ds-search\"><span>tag:trip</span><input value=\"has:file\" aria-label=\"Search\"></label>",
+      "css": ".ds-search{display:flex;gap:10px;align-items:center;height:42px;padding:0 16px;border:1px solid rgba(36,35,34,.12);border-radius:999px;background:#faf9f6;font:400 13.5px \"Geist Mono\",ui-monospace,monospace;color:#57534d;transition:border-color .2s}.ds-search:hover{border-color:rgba(36,35,34,.2)}.ds-search:focus-within{outline:2px solid #242322;outline-offset:3px}.ds-search span{padding:2px 8px;border-radius:6px;background:rgba(255,212,92,.45);color:#242322}.ds-search input{flex:1;min-width:0;border:0;background:none;font:inherit;color:inherit;outline:none}"
+    }
+  ],
+  "narrative": {
+    "northStar": "The Pad You Pull From",
+    "overview": "The page is a pad of sticky notes. A calm, warm stone ground carries heavy ink headlines at poster scale, and the only colour on it is paper: a yellow sticky with a coral peeling corner, and, further down, the app's real pastel note colours. One sheet tears off the hero pad as the visitor scrolls, travels the page, and becomes each capability in turn by doing it, then lands in the library. Everything else (pill nav, pill buttons, hairline spec strips) is quiet stationery that stays out of the note's way.\n\nDensity is generous: one idea per viewport, short copy columns (about 30rem), big vertical rests measured in viewport height. Paper is rendered as a lit material, not a flat fill: a soft inner glow from the upper left, a faint warm settle at the bottom, and a fine grain tooth. Depth comes from soft, low-opacity ink shadows that pool beneath objects; nothing on the page has a hard edge shadow.\n\nThe site refuses the category default of a centred headline over an app screenshot and a three-card feature grid: features are demonstrated by the note itself.",
+    "keyCharacteristics": [
+      "Warm stone ground, ink text, colour reserved for notes.",
+      "Geist at 820 to 860 weight with tight negative tracking for every heading.",
+      "Pills everywhere for interface chrome; squares (13% corner) for notes.",
+      "Paper as material: glow, settle, grain, curl, torn edge.",
+      "One signature scroll interaction (rip, travel, six morphs, land), with a complete static equivalent."
+    ],
+    "rules": [
+      {
+        "name": "The Colour Means a Note Rule",
+        "body": "Saturated colour appears only as paper (a note, a note's peel, or a note-colour highlight). Chrome, sections and text stay in ground, raised and ink. If a coloured element is not a note or part of one, it is wrong. The single exception is the hero desk frame's one atmospheric wallpaper photograph, which is the desktop the pad is docked to (with a calm wash so paper reads against it).",
+        "section": "colors"
+      },
+      {
+        "name": "The One Ink Band Rule",
+        "body": "The page has exactly one full-bleed ink section (open source). Inside it the paper button is the accent and focus rings switch to paper.",
+        "section": "colors"
+      },
+      {
+        "name": "The Heavy Ink Rule",
+        "body": "Every heading is Geist 820 or heavier with tracking between -0.035em and -0.04em, and text-wrap balance. No light or medium display weights.",
+        "section": "typography"
+      },
+      {
+        "name": "The Mono-Free Labels Rule",
+        "body": "Stationery labels (spec strips, legend, ledger) are Geist small uppercase with hairlines, never monospace. Geist Mono is reserved for literal code, queries and filter tokens.",
+        "section": "typography"
+      },
+      {
+        "name": "The Square Module Rule",
+        "body": "Every note pose (pad sheet, traveler slot, figure, library card, fan note) is a square or a square-derived shape; only chapter 01's note widens, because that is the feature.",
+        "section": "layout"
+      },
+      {
+        "name": "The Pooled Shadow Rule",
+        "body": "Box shadows have large blur and a negative spread of roughly half the blur; masked or clipped paper (the traveler, the peel) uses soft drop-shadow filters instead. No hard offset shadows, and no coloured shadows except the faint yellow glow under the paper button.",
+        "section": "elevation"
+      },
+      {
+        "name": "The Lit Paper Rule",
+        "body": "Yellow paper is always drawn as glow + warm settle + warm grain over the paper colour; pastel notes as glow + cool grain over their colour. Never a flat fill.",
+        "section": "elevation"
+      }
+    ],
+    "dos": [
+      "**Do** keep the ground warm stone and every heading in ink at Geist 820 to 860 with -0.035em to -0.04em tracking.",
+      "**Do** reserve saturated colour for paper: the yellow sticky, its coral peel, and the seven note palettes shown as notes.",
+      "**Do** draw paper as lit material (glow, settle, grain) with a pooled ink shadow beneath it.",
+      "**Do** use full pills (999px) for nav, buttons, chips, legend and toasts, and rounded squares for notes.",
+      "**Do** number chapters only through the spec strip, legend and ledger (01 to 06, tabular).",
+      "**Do** give every scroll-driven demonstration a static, complete pose for reduced motion and no-JS."
+    ],
+    "donts": [
+      "**Don't** use cream as the page ground; cream (note-pinq) is a note colour.",
+      "**Don't** introduce colour that is not a note (beyond the one hero wallpaper photograph): no coloured section backgrounds, gradient text, or accent-coloured chrome.",
+      "**Don't** use hard offset shadows or flat, untextured yellow.",
+      "**Don't** set stationery labels in monospace; mono is for code and queries.",
+      "**Don't** add a second full-bleed ink band.",
+      "**Don't** place an eyebrow or kicker line above headlines; the hero opens directly on the headline."
+    ]
+  }
+}

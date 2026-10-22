@@ -1,5 +1,7 @@
 # Pinq
 
+[![License: MIT](https://img.shields.io/badge/license-MIT-ffd45c.svg)](LICENSE) · [Download](https://github.com/Mininoob/pinq/releases/latest) · Website source in [`site/`](site/)
+
 **Sticky notes that live on your desktop, backed by a real knowledge base — local-first, end-to-end encrypted, no account, ever.**
 
 A slim colored pad docks to your screen edge. Pull on it and a sticky note tears off under your cursor. Throw the note to file it, toss it at an edge to tuck it into a tab, and everything you write becomes part of a searchable, linkable, syncable library that never leaves your machines.
